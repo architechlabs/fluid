@@ -1,0 +1,27 @@
+{
+  "name": "fluid",
+  "version": "1.0.0",
+  "description": "Professional screen sharing hub for Raspberry Pi CM4",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "doctor": "node scripts/doctor.js",
+    "install:pi": "sudo bash install.sh"
+  },
+  "keywords": [
+    "raspberry-pi",
+    "screen-sharing",
+    "webrtc",
+    "kiosk",
+    "websocket"
+  ],
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

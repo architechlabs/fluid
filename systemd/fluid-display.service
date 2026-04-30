@@ -1,0 +1,28 @@
+[Unit]
+Description=Fluid Chromium Kiosk Display
+After=fluid-server.service graphical.target
+Requires=fluid-server.service
+
+[Service]
+Type=simple
+User=fluid
+Group=fluid
+EnvironmentFile=/etc/fluid/fluid.env
+
+# Wait for server to be ready
+ExecStartPre=/bin/sleep 3
+
+ExecStart=/usr/bin/startx /opt/fluid/start-kiosk.sh -- :0 vt7 -nocursor
+Restart=always
+RestartSec=5
+
+# Ensure display is available
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/fluid/.Xauthority
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fluid-display
+
+[Install]
+WantedBy=graphical.target

@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluid — Share Your Screen</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222536;
+    --border: #2e3147;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    width: 100%;
+    max-width: 480px;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 28px;
+  }
+  .logo-icon {
+    width: 44px; height: 44px; background: var(--accent);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .logo h1 { font-size: 22px; font-weight: 700; }
+  .logo p { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  label { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 6px; display: block; }
+  input {
+    width: 100%; padding: 10px 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 15px;
+    outline: none; transition: border-color 0.2s;
+  }
+  input:focus { border-color: var(--accent); }
+  .field { margin-bottom: 18px; }
+
+  .btn {
+    width: 100%; padding: 12px;
+    border: none; border-radius: 8px; cursor: pointer;
+    font-size: 15px; font-weight: 600; transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+  .btn-danger { background: var(--red); color: #fff; margin-top: 10px; }
+  .btn-danger:hover:not(:disabled) { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .status-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; border-radius: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    margin-bottom: 20px; font-size: 13px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted); flex-shrink: 0;
+    transition: background 0.3s;
+  }
+  .dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.streaming { background: var(--accent); box-shadow: 0 0 6px var(--accent);
+    animation: pulse 1.5s infinite; }
+  .dot.error { background: var(--red); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; } 50% { opacity: 0.4; }
+  }
+
+  .preview-wrap {
+    position: relative; background: #000;
+    border-radius: 8px; overflow: hidden;
+    aspect-ratio: 16/9; margin-bottom: 18px;
+    border: 1px solid var(--border);
+    display: none;
+  }
+  .preview-wrap.visible { display: block; }
+  video { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .preview-label {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0,0,0,.6); color: var(--accent);
+    font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600;
+  }
+
+  .info-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-bottom: 18px;
+  }
+  .info-item {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  .info-item .val { font-size: 16px; font-weight: 700; color: var(--accent); }
+  .info-item .key { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .alert {
+    padding: 10px 14px; border-radius: 8px; font-size: 13px;
+    margin-bottom: 14px; display: none;
+  }
+  .alert.visible { display: block; }
+  .alert-warn { background: rgba(234,179,8,.12); border: 1px solid rgba(234,179,8,.3); color: var(--yellow); }
+  .alert-err { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); color: var(--red); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">
+    <div class="logo-icon">📺</div>
+    <div>
+      <h1>Fluid</h1>
+      <p>Share your screen to the display</p>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="dot" id="dot"></div>
+    <span id="statusText">Connecting to server…</span>
+  </div>
+
+  <div class="alert alert-warn" id="alertWarn"></div>
+  <div class="alert alert-err"  id="alertErr"></div>
+
+  <!-- Setup form -->
+  <div id="setupView">
+    <div class="field">
+      <label>Your device name</label>
+      <input type="text" id="deviceName" placeholder="e.g. John's MacBook" maxlength="64" />
+    </div>
+    <div class="field">
+      <label>Platform</label>
+      <input type="text" id="platform" readonly />
+    </div>
+    <button class="btn btn-primary" id="startBtn" disabled>Start Screen Share</button>
+  </div>
+
+  <!-- Sharing view -->
+  <div id="sharingView" style="display:none">
+    <div class="info-grid">
+      <div class="info-item">
+        <div class="val" id="statRes">—</div>
+        <div class="key">Resolution</div>
+      </div>
+      <div class="info-item">
+        <div class="val" id="statFps">—</div>
+        <div class="key">Frame Rate</div>
+      </div>
+    </div>
+    <div class="preview-wrap visible">
+      <video id="preview" muted playsinline autoplay></video>
+      <div class="preview-label">LIVE PREVIEW</div>
+    </div>
+    <button class="btn btn-danger" id="stopBtn">Stop Sharing</button>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  ws: null, deviceId: null, pc: null,
+  stream: null, reconnectTimer: null,
+  reconnectDelay: 2000, maxReconnect: 30000,
+  sharing: false, registered: false,
+};
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const dot        = $('dot');
+const statusText = $('statusText');
+const startBtn   = $('startBtn');
+const stopBtn    = $('stopBtn');
+const setupView  = $('setupView');
+const sharingView= $('sharingView');
+const preview    = $('preview');
+const alertWarn  = $('alertWarn');
+const alertErr   = $('alertErr');
+
+// ─── Utilities ────────────────────────────────────────────────────────────────
+function setStatus(text, dotClass) {
+  statusText.textContent = text;
+  dot.className = 'dot ' + (dotClass || '');
+}
+
+function showAlert(el, msg) {
+  el.textContent = msg;
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 6000);
+}
+
+function detectPlatform() {
+  const ua = navigator.userAgent;
+  if (/Windows/.test(ua)) return 'Windows';
+  if (/Mac/.test(ua)) return 'macOS';
+  if (/Linux/.test(ua)) return 'Linux';
+  if (/Android/.test(ua)) return 'Android';
+  if (/iPhone|iPad/.test(ua)) return 'iOS';
+  return 'Unknown';
+}
+
+// ─── WebSocket ────────────────────────────────────────────────────────────────
+function connect() {
+  clearTimeout(state.reconnectTimer);
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.ws = ws;
+
+  ws.addEventListener('open', () => {
+    setStatus('Connected — enter your name and start', 'connected');
+    startBtn.disabled = false;
+    state.reconnectDelay = 2000;
+    if (state.registered && state.sharing) {
+      // Re-register after reconnect
+      doRegister();
+    }
+  });
+
+  ws.addEventListener('message', ev => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMessage(msg);
+  });
+
+  ws.addEventListener('close', () => {
+    setStatus('Disconnected — reconnecting…', 'error');
+    startBtn.disabled = true;
+    state.registered = false;
+    scheduleReconnect();
+  });
+
+  ws.addEventListener('error', () => {
+    setStatus('Connection error', 'error');
+  });
+}
+
+function send(data) {
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify(data));
+  }
+}
+
+function scheduleReconnect() {
+  const delay = state.reconnectDelay;
+  state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, state.maxReconnect);
+  state.reconnectTimer = setTimeout(connect, delay);
+}
+
+// ─── Message Handler ──────────────────────────────────────────────────────────
+async function handleMessage(msg) {
+  switch (msg.type) {
+
+    case 'welcome':
+      // Auto-register if name is already filled and we were sharing
+      if (state.sharing && $('deviceName').value.trim()) doRegister();
+      break;
+
+    case 'registered':
+      state.deviceId   = msg.deviceId;
+      state.registered = true;
+      setStatus(`Registered as "${msg.name}"`, 'connected');
+      if (state.sharing) setStatus('Sharing screen…', 'streaming');
+      break;
+
+    case 'rtc-offer': {
+      // Display wants to connect — create answer
+      await handleOffer(msg.offer);
+      break;
+    }
+
+    case 'rtc-ice': {
+      if (msg.candidate && state.pc) {
+        try { await state.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
+        catch (e) { console.warn('ICE add error:', e); }
+      }
+      break;
+    }
+
+    case 'kicked':
+      showAlert(alertErr, 'You were removed by the admin.');
+      stopSharing();
+      break;
+
+    case 'error':
+      showAlert(alertErr, msg.message || 'Server error');
+      break;
+  }
+}
+
+// ─── Registration ─────────────────────────────────────────────────────────────
+function doRegister() {
+  send({
+    type:     'register-client',
+    name:     $('deviceName').value.trim() || 'Unnamed Device',
+    platform: $('platform').value,
+  });
+}
+
+// ─── Screen Sharing ───────────────────────────────────────────────────────────
+async function startSharing() {
+  const name = $('deviceName').value.trim();
+  if (!name) { showAlert(alertWarn, 'Please enter your device name.'); return; }
+
+  // Check browser support
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    showAlert(alertErr, 'Screen sharing is not supported in this browser. Please use Chrome, Edge, or Firefox.');
+    return;
+  }
+
+  try {
+    setStatus('Requesting screen access…', '');
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: { ideal: 30, max: 60 }, cursor: 'always' },
+      audio: false,
+    });
+
+    state.stream  = stream;
+    state.sharing = true;
+    preview.srcObject = stream;
+
+    // Update stats
+    const vt = stream.getVideoTracks()[0];
+    const settings = vt.getSettings();
+    $('statRes').textContent = `${settings.width}×${settings.height}`;
+    $('statFps').textContent = `${settings.frameRate || '—'} fps`;
+
+    // Register with server
+    doRegister();
+    send({ type: 'stream-started' });
+
+    // UI swap
+    setupView.style.display  = 'none';
+    sharingView.style.display = 'block';
+    setStatus('Sharing screen…', 'streaming');
+
+    // If display sends an offer, createPeerConnection will be called
+    // Handle stream end by user (browser stop-share button)
+    vt.addEventListener('ended', () => stopSharing());
+
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      showAlert(alertWarn, 'Screen access denied. Please allow screen sharing when prompted.');
+    } else {
+      showAlert(alertErr, `Error: ${err.message}`);
+    }
+    setStatus('Ready', 'connected');
+  }
+}
+
+async function handleOffer(offer) {
+  if (!state.stream) return;
+
+  // Close old connection
+  if (state.pc) { state.pc.close(); state.pc = null; }
+
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  });
+  state.pc = pc;
+
+  // Add tracks
+  state.stream.getTracks().forEach(t => pc.addTrack(t, state.stream));
+
+  // ICE candidates → server
+  pc.addEventListener('icecandidate', ev => {
+    if (ev.candidate) {
+      send({ type: 'rtc-ice', candidate: ev.candidate });
+    }
+  });
+
+  pc.addEventListener('connectionstatechange', () => {
+    if (pc.connectionState === 'connected') {
+      setStatus('Streaming to display ✓', 'streaming');
+    } else if (['disconnected','failed'].includes(pc.connectionState)) {
+      setStatus('RTC disconnected — waiting for display…', 'connected');
+    }
+  });
+
+  await pc.setRemoteDescription(new RTCSessionDescription(offer));
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  send({ type: 'rtc-answer', answer: pc.localDescription });
+}
+
+function stopSharing() {
+  state.sharing = false;
+  state.registered = false;
+  if (state.stream) {
+    state.stream.getTracks().forEach(t => t.stop());
+    state.stream = null;
+  }
+  if (state.pc) { state.pc.close(); state.pc = null; }
+  preview.srcObject = null;
+  send({ type: 'stream-stopped' });
+  setupView.style.display  = 'block';
+  sharingView.style.display = 'none';
+  setStatus('Ready — start a new session', 'connected');
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+$('platform').value = detectPlatform();
+
+// Suggested name from browser
+const suggested = (() => {
+  const stored = localStorage.getItem('Fluid-name');
+  if (stored) return stored;
+  return '';
+})();
+if (suggested) $('deviceName').value = suggested;
+
+startBtn.addEventListener('click', startSharing);
+stopBtn.addEventListener('click', stopSharing);
+
+$('deviceName').addEventListener('change', () => {
+  localStorage.setItem('Fluid-name', $('deviceName').value.trim());
+});
+
+// Check HTTPS warning
+if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+  showAlert(alertWarn, 'Note: Screen sharing requires HTTPS on most browsers when not on localhost. If sharing fails, try accessing via HTTPS.');
+}
+
+connect();
+</script>
+</body>
+</html>

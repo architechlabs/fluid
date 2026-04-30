@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fluid — Admin</title>
+<style>
+  :root {
+    --bg: #0a0c14;
+    --surface: #131623;
+    --surface2: #1a1d2e;
+    --surface3: #1f2235;
+    --border: #252840;
+    --accent: #6366f1;
+    --accent2: #818cf8;
+    --green: #22c55e;
+    --red: #ef4444;
+    --yellow: #eab308;
+    --orange: #f97316;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --radius: 12px;
+    --sidebar: 260px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Layout ── */
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar {
+    width: var(--sidebar); background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; position: fixed; top: 0; bottom: 0; left: 0;
+    z-index: 20;
+  }
+  .main { margin-left: var(--sidebar); flex: 1; padding: 28px; }
+
+  /* ── Sidebar ── */
+  .sidebar-logo {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .logo-icon { width: 38px; height: 38px; background: var(--accent); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .logo-text h2 { font-size: 16px; font-weight: 700; }
+  .logo-text p  { font-size: 11px; color: var(--muted); }
+
+  .sidebar-nav { padding: 12px 10px; flex: 1; overflow-y: auto; }
+  .nav-section { margin-bottom: 20px; }
+  .nav-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); padding: 0 10px; margin-bottom: 6px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--muted);
+    transition: all 0.15s; text-decoration: none;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: rgba(99,102,241,.15); color: var(--accent2); }
+  .nav-item .icon { width: 18px; text-align: center; font-size: 14px; }
+
+  .sidebar-footer { padding: 16px; border-top: 1px solid var(--border); }
+  .server-info { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .server-info strong { color: var(--text); }
+
+  /* ── Top bar ── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px; gap: 16px; flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 20px; font-weight: 700; }
+  .topbar-right { display: flex; gap: 10px; align-items: center; }
+
+  /* ── Stat cards ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 16px 18px;
+  }
+  .stat-card .val { font-size: 28px; font-weight: 800; }
+  .stat-card .key { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .stat-card.green .val { color: var(--green); }
+  .stat-card.accent .val { color: var(--accent2); }
+  .stat-card.orange .val { color: var(--orange); }
+
+  /* ── Pill / badge ── */
+  .pill {
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 5px;
+  }
+  .pill.green  { background: rgba(34,197,94,.15);  color: var(--green); }
+  .pill.red    { background: rgba(239,68,68,.15);   color: var(--red); }
+  .pill.accent { background: rgba(99,102,241,.15);  color: var(--accent2); }
+  .pill.yellow { background: rgba(234,179,8,.15);   color: var(--yellow); }
+  .dot-live { width:7px; height:7px; border-radius:50%; background:currentColor;
+    animation: pulse 1.5s infinite; }
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+  /* ── Section ── */
+  .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; }
+  .section-head {
+    padding: 16px 20px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+  }
+  .section-head h2 { font-size: 14px; font-weight: 600; }
+
+  /* ── Device table ── */
+  .device-table { width: 100%; border-collapse: collapse; }
+  .device-table th {
+    text-align: left; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--muted); padding: 10px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .device-table td { padding: 12px 20px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  .device-table tr:last-child td { border-bottom: none; }
+  .device-table tr:hover td { background: var(--surface2); }
+  .device-name { font-weight: 600; }
+  .device-sub  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* ── Buttons ── */
+  .btn {
+    padding: 7px 14px; border: none; border-radius: 7px;
+    cursor: pointer; font-size: 12px; font-weight: 600;
+    transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-accent { background: rgba(99,102,241,.2); color: var(--accent2); border: 1px solid rgba(99,102,241,.3); }
+  .btn-accent:hover:not(:disabled) { background: rgba(99,102,241,.35); }
+  .btn-accent.active { background: var(--accent); color: #fff; box-shadow: 0 0 14px rgba(99,102,241,.4); }
+  .btn-red  { background: rgba(239,68,68,.15); color: var(--red); border: 1px solid rgba(239,68,68,.25); }
+  .btn-red:hover:not(:disabled) { background: rgba(239,68,68,.3); }
+  .btn-ghost { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { background: var(--surface3); }
+  .btn:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ── Log console ── */
+  #logConsole {
+    background: #080b14; border-radius: 8px;
+    padding: 14px; font-family: 'Courier New', monospace;
+    font-size: 12px; line-height: 1.7; color: #94a3b8;
+    max-height: 280px; overflow-y: auto;
+    margin: 0 16px 16px;
+  }
+  .log-info  { color: #60a5fa; }
+  .log-warn  { color: var(--yellow); }
+  .log-error { color: var(--red); }
+  .log-ts    { color: var(--muted); }
+
+  /* ── Auth overlay ── */
+  #authOverlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999; backdrop-filter: blur(6px);
+  }
+  #authOverlay.hidden { display: none; }
+  .auth-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 36px; width: 320px; text-align: center;
+  }
+  .auth-card .icon { font-size: 48px; margin-bottom: 12px; }
+  .auth-card h2 { margin-bottom: 6px; }
+  .auth-card p  { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .pin-input {
+    width: 100%; padding: 12px; text-align: center; letter-spacing: 6px;
+    font-size: 20px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); outline: none; margin-bottom: 14px;
+  }
+  .pin-input:focus { border-color: var(--accent); }
+  .btn-lg { width: 100%; padding: 12px; font-size: 14px; border-radius: 8px; }
+
+  /* ── Rename modal ── */
+  #renameModal {
+    position: fixed; inset: 0; background: rgba(0,0,0,.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 500;
+  }
+  #renameModal.open { display: flex; }
+  .modal-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px; width: 360px;
+  }
+  .modal-card h3 { margin-bottom: 14px; }
+  .modal-input {
+    width: 100%; padding: 10px 12px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+    font-size: 14px; outline: none; margin-bottom: 14px;
+  }
+  .modal-input:focus { border-color: var(--accent); }
+  .modal-btns { display: flex; gap: 10px; }
+
+  /* ── Alert toast ── */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 20px; font-size: 13px;
+    opacity: 0; transition: opacity 0.3s; z-index: 900; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ── Responsive ── */
+  @media (max-width: 700px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Auth overlay -->
+<div id="authOverlay">
+  <div class="auth-card">
+    <div class="icon">🔐</div>
+    <h2>Admin Access</h2>
+    <p>Enter your admin PIN to manage Fluid</p>
+    <input class="pin-input" type="password" id="pinInput" placeholder="PIN" maxlength="20" />
+    <button class="btn btn-accent btn-lg" id="pinBtn">Unlock</button>
+    <p id="pinErr" style="color:var(--red);font-size:12px;margin-top:10px;display:none">Incorrect PIN</p>
+  </div>
+</div>
+
+<!-- Rename modal -->
+<div id="renameModal">
+  <div class="modal-card">
+    <h3>Rename Device</h3>
+    <input class="modal-input" type="text" id="renameInput" placeholder="New device name" maxlength="64" />
+    <div class="modal-btns">
+      <button class="btn btn-accent" id="renameConfirm">Save</button>
+      <button class="btn btn-ghost" onclick="closeRenameModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<!-- Layout -->
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">📺</div>
+      <div class="logo-text">
+        <h2>Fluid</h2>
+        <p>Admin Dashboard</p>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-label">Management</div>
+        <a class="nav-item active" href="#devices"><span class="icon">💻</span> Devices</a>
+        <a class="nav-item" href="#display"><span class="icon">🖥️</span> Display</a>
+        <a class="nav-item" href="#server"><span class="icon">⚙️</span> Server Info</a>
+        <a class="nav-item" href="#logs"><span class="icon">📋</span> Event Log</a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="server-info">
+        <div>Host: <strong id="sideHostname">—</strong></div>
+        <div>IP: <strong id="sideIp">—</strong></div>
+        <div>Uptime: <strong id="sideUptime">—</strong></div>
+        <div style="margin-top:8px">
+          Display: <span id="sideDisplay" class="pill red">Offline</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main">
+    <div class="topbar">
+      <h1>Device Management</h1>
+      <div class="topbar-right">
+        <span id="serverPill" class="pill red">● Server</span>
+        <button class="btn btn-ghost" onclick="fetchStats()">↻ Refresh</button>
+        <button class="btn btn-red" id="deselBtn" disabled onclick="deselect()">Stop Display</button>
+        <button class="btn btn-ghost" onclick="reloadDisplay()">Reload Display</button>
+      </div>
+    </div>
+
+    <!-- Stat cards -->
+    <div class="stat-grid" id="statGrid">
+      <div class="stat-card green"><div class="val" id="scDevices">0</div><div class="key">Connected Devices</div></div>
+      <div class="stat-card accent"><div class="val" id="scActive">—</div><div class="key">Active on Display</div></div>
+      <div class="stat-card orange"><div class="val" id="scUptime">—</div><div class="key">Server Uptime</div></div>
+      <div class="stat-card"><div class="val" id="scPort">3000</div><div class="key">Server Port</div></div>
+    </div>
+
+    <!-- Device list -->
+    <div class="section" id="devices">
+      <div class="section-head">
+        <h2>Connected Devices</h2>
+        <div id="deviceCount" class="pill accent">0 online</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="device-table">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Platform</th>
+              <th>Status</th>
+              <th>IP Address</th>
+              <th>Connected</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="deviceTableBody">
+            <tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">No devices connected</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Server info -->
+    <div class="section" id="server">
+      <div class="section-head"><h2>Server Info</h2></div>
+      <div style="padding:16px 20px">
+        <table class="device-table">
+          <tbody id="serverInfoTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Event log -->
+    <div class="section" id="logs">
+      <div class="section-head">
+        <h2>Event Log</h2>
+        <button class="btn btn-ghost" onclick="clearLog()">Clear</button>
+      </div>
+      <div id="logConsole"><span class="log-info">Fluid Admin initializing…</span></div>
+    </div>
+  </main>
+</div>
+
+<script>
+'use strict';
+
+let ws = null, adminPin = null;
+let devices = [], activeDeviceId = null;
+let renameTargetId = null;
+let reconnectDelay = 2000;
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, duration = 3000) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), duration);
+}
+
+// ── Log ───────────────────────────────────────────────────────────────────────
+function addLog(text, level = 'info') {
+  const log = $('logConsole');
+  const ts = new Date().toLocaleTimeString();
+  const div = document.createElement('div');
+  div.innerHTML = `<span class="log-ts">[${ts}]</span> <span class="log-${level}">${escHtml(text)}</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  // Keep max 200 lines
+  while (log.children.length > 200) log.removeChild(log.firstChild);
+}
+
+function clearLog() { $('logConsole').innerHTML = ''; }
+function escHtml(s) { return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+$('pinInput').addEventListener('keydown', e => { if (e.key==='Enter') $('pinBtn').click(); });
+$('pinBtn').addEventListener('click', () => {
+  adminPin = $('pinInput').value;
+  connect();
+});
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+
+  ws.addEventListener('open', () => {
+    $('serverPill').className = 'pill green';
+    $('serverPill').textContent = '● Server';
+    reconnectDelay = 2000;
+    addLog('WebSocket connected');
+    ws.send(JSON.stringify({ type: 'register-admin', pin: adminPin }));
+  });
+
+  ws.addEventListener('message', ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMsg(msg);
+  });
+
+  ws.addEventListener('close', () => {
+    $('serverPill').className = 'pill red';
+    addLog('WebSocket disconnected — reconnecting…', 'warn');
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 20000);
+  });
+}
+
+function send(data) {
+  if (ws?.readyState === 1) ws.send(JSON.stringify(data));
+}
+
+function handleMsg(msg) {
+  switch (msg.type) {
+    case 'auth-error':
+      $('pinErr').style.display = 'block';
+      addLog('Authentication failed', 'error');
+      adminPin = null;
+      break;
+
+    case 'admin-welcome':
+      $('authOverlay').classList.add('hidden');
+      devices = msg.devices || [];
+      activeDeviceId = msg.activeDeviceId;
+      renderDevices();
+      updateServerInfo(msg.serverInfo);
+      updateDisplayStatus(msg.displayOnline);
+      addLog(`Admin authenticated — ${devices.length} device(s) online`);
+      break;
+
+    case 'device-list':
+      devices = msg.devices || [];
+      activeDeviceId = msg.activeDeviceId;
+      renderDevices();
+      updateStats();
+      break;
+
+    case 'display-status':
+      updateDisplayStatus(msg.connected);
+      addLog(`Display ${msg.connected ? 'connected' : 'disconnected'}`, msg.connected ? 'info' : 'warn');
+      break;
+
+    case 'device-streaming':
+      addLog(`Device ${msg.deviceId.slice(0,8)}… ${msg.streaming ? 'started' : 'stopped'} streaming`);
+      break;
+
+    case 'error':
+      toast('Error: ' + msg.message);
+      addLog(msg.message, 'error');
+      break;
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderDevices() {
+  const tbody = $('deviceTableBody');
+  $('deviceCount').textContent = `${devices.length} online`;
+  $('scDevices').textContent   = devices.length;
+
+  if (devices.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:30px">No devices connected</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = devices.map(d => {
+    const isActive = d.id === activeDeviceId;
+    const time = new Date(d.connectedAt).toLocaleTimeString();
+    const statusPill = d.status === 'streaming'
+      ? `<span class="pill accent"><span class="dot-live"></span> LIVE</span>`
+      : `<span class="pill green">● Online</span>`;
+    return `
+      <tr>
+        <td>
+          <div class="device-name">${escHtml(d.name)}</div>
+          <div class="device-sub">${escHtml(d.id.slice(0,12))}…</div>
+        </td>
+        <td>${escHtml(d.platform || '—')}</td>
+        <td>${statusPill}</td>
+        <td style="font-family:monospace;font-size:12px">${escHtml(d.ip || '—')}</td>
+        <td style="color:var(--muted)">${time}</td>
+        <td>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-accent ${isActive ? 'active' : ''}"
+              onclick="selectDevice('${d.id}')">
+              ${isActive ? '▶ Showing' : '▶ Show'}
+            </button>
+            <button class="btn btn-ghost" onclick="openRename('${d.id}','${escHtml(d.name)}')">✏️</button>
+            <button class="btn btn-red" onclick="kickDevice('${d.id}')">✕ Kick</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  // Update active device name in stats
+  const active = devices.find(d => d.id === activeDeviceId);
+  $('scActive').textContent = active ? active.name : '—';
+  $('deselBtn').disabled = !activeDeviceId;
+}
+
+function updateStats() {
+  $('scDevices').textContent = devices.length;
+  const active = devices.find(d => d.id === activeDeviceId);
+  $('scActive').textContent = active ? active.name : '—';
+}
+
+function updateServerInfo(info) {
+  if (!info) return;
+  $('sideHostname').textContent = info.hostname || '—';
+  $('sideIp').textContent = (info.ips || []).join(', ') || '—';
+  $('scPort').textContent = info.port || '3000';
+  updateUptime(info.uptime || 0);
+
+  const tbody = $('serverInfoTable');
+  tbody.innerHTML = [
+    ['Hostname', info.hostname],
+    ['IP Addresses', (info.ips || []).join(', ')],
+    ['Port', info.port],
+    ['Platform', info.platform],
+    ['Started At', info.stats?.startedAt || '—'],
+    ['Total Connections', info.stats?.totalConnections || 0],
+    ['Total Sessions', info.stats?.totalSessions || 0],
+  ].map(([k,v]) => `
+    <tr>
+      <td style="color:var(--muted);width:180px;font-size:12px">${k}</td>
+      <td style="font-weight:600">${escHtml(String(v||'—'))}</td>
+    </tr>
+  `).join('');
+}
+
+function updateUptime(secs) {
+  const h = Math.floor(secs/3600), m = Math.floor((secs%3600)/60);
+  const upStr = h > 0 ? `${h}h ${m}m` : `${m}m`;
+  $('scUptime').textContent = upStr;
+  $('sideUptime').textContent = upStr;
+}
+
+function updateDisplayStatus(online) {
+  const el = $('sideDisplay');
+  el.className = 'pill ' + (online ? 'green' : 'red');
+  el.textContent = online ? 'Online' : 'Offline';
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+function selectDevice(deviceId) {
+  if (activeDeviceId === deviceId) return;
+  send({ type: 'select-device', deviceId });
+  addLog(`Switching display to device ${deviceId.slice(0,8)}…`);
+  toast('Switching display…');
+}
+
+function deselect() {
+  send({ type: 'select-device', deviceId: null });
+  addLog('Display cleared');
+  toast('Display cleared');
+}
+
+function kickDevice(deviceId) {
+  if (!confirm('Kick this device?')) return;
+  send({ type: 'kick-device', deviceId });
+  addLog(`Kicked device ${deviceId.slice(0,8)}…`, 'warn');
+  toast('Device kicked');
+}
+
+function reloadDisplay() {
+  if (!confirm('Reload the Pi display?')) return;
+  send({ type: 'restart-display' });
+  addLog('Display reload triggered', 'warn');
+  toast('Display reloading…');
+}
+
+// ── Rename modal ──────────────────────────────────────────────────────────────
+function openRename(deviceId, currentName) {
+  renameTargetId = deviceId;
+  $('renameInput').value = currentName;
+  $('renameModal').classList.add('open');
+  $('renameInput').focus();
+}
+
+function closeRenameModal() {
+  $('renameModal').classList.remove('open');
+  renameTargetId = null;
+}
+
+$('renameConfirm').addEventListener('click', () => {
+  const name = $('renameInput').value.trim();
+  if (!name) return;
+  send({ type: 'rename-device', deviceId: renameTargetId, name });
+  addLog(`Renamed device to "${name}"`);
+  toast(`Renamed to "${name}"`);
+  closeRenameModal();
+});
+
+$('renameInput').addEventListener('keydown', e => { if(e.key==='Enter') $('renameConfirm').click(); });
+
+// ── Stats auto-refresh ────────────────────────────────────────────────────────
+function fetchStats() {
+  fetch(`/api/health?pin=${encodeURIComponent(adminPin)}`)
+    .then(r => r.json())
+    .then(d => {
+      updateUptime(d.uptime);
+      updateDisplayStatus(d.displayOnline);
+    })
+    .catch(() => {});
+}
+
+// Uptime ticker
+setInterval(() => {
+  const el = $('scUptime');
+  const txt = el.textContent;
+  // Re-fetch every 30s
+}, 30000);
+
+setInterval(fetchStats, 30000);
+</script>
+</body>
+</html>

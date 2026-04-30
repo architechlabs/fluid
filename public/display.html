@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fluid Display</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #000;
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    color: #fff;
+  }
+
+  /* ── Standby Screen ─────────────────────────────── */
+  #standby {
+    position: fixed; inset: 0;
+    background: #080b14;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 20px;
+    z-index: 10;
+    transition: opacity 0.5s;
+  }
+  #standby.hidden { opacity: 0; pointer-events: none; }
+  .standby-logo {
+    font-size: 80px; margin-bottom: 8px;
+  }
+  .standby-title {
+    font-size: 42px; font-weight: 700;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .standby-sub {
+    font-size: 20px; color: #64748b;
+  }
+  .standby-url {
+    margin-top: 20px;
+    background: #1a1d27; border: 1px solid #2e3147;
+    border-radius: 12px; padding: 16px 28px;
+    text-align: center;
+  }
+  .standby-url .label { font-size: 13px; color: #64748b; margin-bottom: 6px; }
+  .standby-url .url {
+    font-size: 26px; font-weight: 700; color: #818cf8;
+    font-family: 'Courier New', monospace;
+  }
+  .standby-url .hint { font-size: 13px; color: #475569; margin-top: 6px; }
+
+  .device-list {
+    display: flex; flex-wrap: wrap; gap: 12px;
+    justify-content: center; max-width: 900px;
+    margin-top: 8px;
+  }
+  .device-chip {
+    background: #1a1d27; border: 1px solid #2e3147;
+    border-radius: 8px; padding: 8px 16px;
+    font-size: 14px; color: #94a3b8;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .device-chip .d { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  .device-chip.streaming .d { background: #6366f1; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+
+  .conn-status {
+    position: fixed; top: 20px; right: 20px;
+    background: rgba(0,0,0,.6); border: 1px solid #2e3147;
+    border-radius: 8px; padding: 8px 14px;
+    font-size: 13px; display: flex; align-items: center; gap: 8px;
+    z-index: 100;
+  }
+  .conn-status .d { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+  .conn-status .d.ok { background: #22c55e; }
+
+  /* ── Video ──────────────────────────────────────── */
+  #videoWrap {
+    position: fixed; inset: 0;
+    background: #000;
+    display: none;
+  }
+  #videoWrap.visible { display: flex; align-items: center; justify-content: center; }
+  video {
+    width: 100%; height: 100%;
+    object-fit: contain;
+  }
+
+  /* ── Overlay (device name banner) ───────────────── */
+  #banner {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: linear-gradient(0deg, rgba(0,0,0,.9) 0%, transparent 100%);
+    padding: 30px 40px 24px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    opacity: 0; transition: opacity 0.4s;
+    pointer-events: none;
+    z-index: 20;
+  }
+  #banner.visible { opacity: 1; }
+  #banner.fade { animation: fadeOut 3s forwards; }
+  @keyframes fadeOut { 0%{opacity:1}70%{opacity:1}100%{opacity:0} }
+  .banner-name { font-size: 22px; font-weight: 700; text-shadow: 0 2px 8px rgba(0,0,0,.8); }
+  .banner-sub { font-size: 14px; color: #94a3b8; margin-top: 4px; }
+  .banner-live {
+    background: #ef4444; color: #fff;
+    font-size: 13px; font-weight: 700; padding: 5px 12px;
+    border-radius: 6px; letter-spacing: 1px;
+    display: flex; align-items: center; gap: 6px;
+    animation: pulse 2s infinite;
+  }
+</style>
+</head>
+<body>
+
+<!-- Connection status badge -->
+<div class="conn-status">
+  <div class="d" id="connDot"></div>
+  <span id="connLabel">Connecting…</span>
+</div>
+
+<!-- Standby screen -->
+<div id="standby">
+  <div class="standby-logo">📺</div>
+  <div class="standby-title">Fluid</div>
+  <div class="standby-sub">Waiting for a screen to display…</div>
+
+  <div class="standby-url" id="urlBox">
+    <div class="label">Connect your device at</div>
+    <div class="url" id="serverUrl">—</div>
+    <div class="hint">Open in any browser · No install required</div>
+  </div>
+
+  <div class="device-list" id="deviceList"></div>
+</div>
+
+<!-- Live video -->
+<div id="videoWrap">
+  <video id="remoteVideo" autoplay playsinline></video>
+</div>
+
+<!-- Name banner -->
+<div id="banner">
+  <div>
+    <div class="banner-name" id="bannerName"></div>
+    <div class="banner-sub" id="bannerSub"></div>
+  </div>
+  <div class="banner-live">● LIVE</div>
+</div>
+
+<script>
+'use strict';
+
+const state = {
+  ws: null, pc: null,
+  reconnectDelay: 1000,
+  activeDeviceId: null,
+  devices: [],
+  streaming: false,
+};
+
+// DOM
+const standby    = document.getElementById('standby');
+const videoWrap  = document.getElementById('videoWrap');
+const remoteVideo= document.getElementById('remoteVideo');
+const banner     = document.getElementById('banner');
+const bannerName = document.getElementById('bannerName');
+const bannerSub  = document.getElementById('bannerSub');
+const deviceList = document.getElementById('deviceList');
+const serverUrl  = document.getElementById('serverUrl');
+const connDot    = document.getElementById('connDot');
+const connLabel  = document.getElementById('connLabel');
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function setConnStatus(ok, label) {
+  connDot.className  = 'd' + (ok ? ' ok' : '');
+  connLabel.textContent = label;
+}
+
+function showVideo(deviceName, platform) {
+  standby.classList.add('hidden');
+  videoWrap.classList.add('visible');
+  bannerName.textContent = deviceName;
+  bannerSub.textContent  = platform || '';
+  banner.className = 'banner visible';
+  // Auto-hide banner after 4 s
+  setTimeout(() => { banner.classList.add('fade'); }, 1000);
+}
+
+function showStandby() {
+  standby.classList.remove('hidden');
+  videoWrap.classList.remove('visible');
+  banner.className = 'banner';
+  if (remoteVideo.srcObject) {
+    remoteVideo.srcObject.getTracks().forEach(t => t.stop());
+    remoteVideo.srcObject = null;
+  }
+}
+
+function renderDeviceList(devices) {
+  state.devices = devices;
+  deviceList.innerHTML = devices.length === 0
+    ? '<div style="color:#475569;font-size:14px">No devices connected yet</div>'
+    : devices.map(d =>
+        `<div class="device-chip ${d.id === state.activeDeviceId ? 'streaming' : ''}">
+           <div class="d"></div>${escHtml(d.name)}
+         </div>`
+      ).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── WebRTC ────────────────────────────────────────────────────────────────────
+async function initiateRtc(deviceId) {
+  // Tear down old connection
+  if (state.pc) { state.pc.close(); state.pc = null; }
+
+  const pc = new RTCPeerConnection({
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  });
+  state.pc = pc;
+
+  // Receive remote track
+  pc.addEventListener('track', ev => {
+    remoteVideo.srcObject = ev.streams[0];
+    const dev = state.devices.find(d => d.id === deviceId);
+    showVideo(dev?.name || 'Unknown Device', dev?.platform);
+    state.streaming = true;
+  });
+
+  pc.addEventListener('icecandidate', ev => {
+    if (ev.candidate) {
+      send({ type: 'rtc-ice', candidate: ev.candidate, targetDeviceId: deviceId });
+    }
+  });
+
+  pc.addEventListener('connectionstatechange', () => {
+    if (['disconnected','failed'].includes(pc.connectionState)) {
+      showStandby();
+      state.streaming = false;
+    }
+  });
+
+  // Create offer (video receive only)
+  pc.addTransceiver('video', { direction: 'recvonly' });
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  send({ type: 'rtc-offer', offer: pc.localDescription, targetDeviceId: deviceId });
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  state.ws = ws;
+
+  ws.addEventListener('open', () => {
+    setConnStatus(true, 'Server connected');
+    state.reconnectDelay = 1000;
+    send({ type: 'register-display' });
+  });
+
+  ws.addEventListener('message', ev => {
+    let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMessage(msg);
+  });
+
+  ws.addEventListener('close', () => {
+    setConnStatus(false, 'Reconnecting…');
+    setTimeout(connect, state.reconnectDelay);
+    state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, 15000);
+  });
+}
+
+function send(data) {
+  if (state.ws?.readyState === 1) state.ws.send(JSON.stringify(data));
+}
+
+async function handleMessage(msg) {
+  switch (msg.type) {
+
+    case 'welcome': {
+      // Show server URL on standby
+      serverUrl.textContent = `${location.protocol}//${location.host}`;
+      break;
+    }
+
+    case 'display-welcome': {
+      setConnStatus(true, 'Display registered');
+      state.devices       = msg.devices || [];
+      state.activeDeviceId= msg.activeDeviceId;
+      renderDeviceList(state.devices);
+      if (msg.activeDeviceId) initiateRtc(msg.activeDeviceId);
+      break;
+    }
+
+    case 'device-list': {
+      state.devices        = msg.devices || [];
+      state.activeDeviceId = msg.activeDeviceId;
+      renderDeviceList(state.devices);
+      break;
+    }
+
+    case 'initiate-rtc': {
+      state.activeDeviceId = msg.deviceId;
+      renderDeviceList(state.devices);
+      await initiateRtc(msg.deviceId);
+      break;
+    }
+
+    case 'deselect': {
+      state.activeDeviceId = null;
+      if (state.pc) { state.pc.close(); state.pc = null; }
+      showStandby();
+      renderDeviceList(state.devices);
+      break;
+    }
+
+    case 'stream-ended': {
+      if (msg.deviceId === state.activeDeviceId) {
+        showStandby();
+        state.streaming = false;
+      }
+      break;
+    }
+
+    case 'rtc-answer': {
+      if (state.pc) {
+        await state.pc.setRemoteDescription(new RTCSessionDescription(msg.answer));
+      }
+      break;
+    }
+
+    case 'rtc-ice': {
+      if (state.pc && msg.candidate) {
+        try { await state.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
+        catch (e) { console.warn('ICE error', e); }
+      }
+      break;
+    }
+
+    case 'reload':
+      location.reload();
+      break;
+  }
+}
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+// Prevent screen blanking via periodic animation
+document.addEventListener('visibilitychange', () => {
+  // Re-register if we come back
+  if (!document.hidden && state.ws?.readyState !== 1) connect();
+});
+
+// Auto full-screen on click (helps in kiosk)
+document.addEventListener('click', () => {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+}, { once: true });
+
+connect();
+</script>
+</body>
+</html>

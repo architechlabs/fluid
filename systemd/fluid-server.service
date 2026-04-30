@@ -1,0 +1,36 @@
+[Unit]
+Description=Fluid WebRTC Signaling Server
+Documentation=https://github.com/Fluid
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fluid
+Group=fluid
+WorkingDirectory=/opt/fluid
+ExecStart=/usr/bin/node /opt/fluid/server.js
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=5
+
+# Environment
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/fluid/fluid.env
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/fluid
+CapabilityBoundingSet=
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=Fluid
+
+[Install]
+WantedBy=multi-user.target
