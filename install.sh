@@ -20,7 +20,7 @@ NODE_VERSION="20"
 SERVER_PORT="3000"
 ADMIN_PIN=""
 MAX_DEVICES="20"
-WITH_HTTPS="false"
+WITH_HTTPS="true"
 HTTPS_NAME=""
 NO_REBOOT="false"
 NO_START="false"
@@ -45,7 +45,8 @@ Options:
   --max-devices N       Max client devices. Default: 20.
   --install-dir PATH    Install directory. Default: /opt/fluid.
   --user NAME           Service user. Default: fluid.
-  --with-https          Install nginx reverse proxy with a self-signed cert.
+  --with-https          Install nginx reverse proxy with a self-signed cert. Default.
+  --no-https            Skip HTTPS reverse proxy setup.
   --https-name NAME     Certificate name/CN. Default: fluid.local.
   --no-reboot           Do not prompt for reboot.
   --no-start            Install only; do not start services.
@@ -54,7 +55,7 @@ Options:
 
 Examples:
   sudo bash install.sh
-  sudo bash install.sh --admin-pin 8432 --port 3000 --with-https
+  sudo bash install.sh --admin-pin 8432 --port 3000
   sudo bash install.sh --admin-pin "$PIN" --yes --no-reboot
 USAGE
 }
@@ -67,6 +68,7 @@ while [[ $# -gt 0 ]]; do
     --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
     --with-https) WITH_HTTPS="true"; shift ;;
+    --no-https) WITH_HTTPS="false"; shift ;;
     --https-name) HTTPS_NAME="${2:-}"; shift 2 ;;
     --no-reboot) NO_REBOOT="true"; shift ;;
     --no-start) NO_START="true"; shift ;;
@@ -133,7 +135,15 @@ install_packages() {
     xorg
 
   if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
-    apt-get install -y -qq chromium-browser || apt-get install -y -qq chromium
+    local chromium_package=""
+    if apt-cache show chromium >/dev/null 2>&1; then
+      chromium_package="chromium"
+    elif apt-cache show chromium-browser >/dev/null 2>&1; then
+      chromium_package="chromium-browser"
+    else
+      err "Could not find chromium or chromium-browser in apt. Run apt update and confirm Raspberry Pi OS repositories are enabled."
+    fi
+    apt-get install -y -qq "$chromium_package"
   fi
 
   log "System packages ready"
@@ -204,6 +214,7 @@ ADMIN_PIN=${ADMIN_PIN}
 MAX_DEVICES=${MAX_DEVICES}
 LOG_FILE=${LOG_DIR}/server.log
 CHROMIUM_BIN=${chromium_bin}
+HTTPS_REDIRECT=${WITH_HTTPS}
 # Override to force the kiosk to open a different address:
 # SERVER_URL=http://localhost:${SERVER_PORT}/display.html
 EOF

@@ -11,7 +11,7 @@ Users open one page from any laptop on the same network, share their screen, and
 - Full-screen HDMI display mode for the Pi
 - WebRTC peer connection over LAN
 - Systemd services that start on boot
-- One installer that configures Node.js, Chromium, Xorg, logs, services, and optional HTTPS
+- One installer that configures Node.js, Chromium, Xorg, logs, services, and HTTPS
 - A doctor script for setup checks
 
 ## Architecture
@@ -45,7 +45,7 @@ The installer asks for the admin PIN and port, then handles the rest:
 - Installs system packages
 - Installs Node.js 20 if needed
 - Installs npm dependencies
-- Creates the `Fluid` service user
+- Creates the `fluid` service user
 - Writes `/etc/fluid/fluid.env`
 - Installs systemd services
 - Configures Chromium kiosk startup
@@ -58,28 +58,34 @@ For unattended installs:
 sudo bash install.sh --admin-pin 8432 --port 3000 --yes --no-reboot
 ```
 
-For HTTPS with a self-signed local certificate:
+HTTPS is installed by default because browser screen sharing is blocked on plain HTTP from another device. Fluid also redirects direct HTTP page requests to the secure URL after installation, so users do not need to remember the right version.
 
 ```bash
-sudo bash install.sh --admin-pin 8432 --with-https
+sudo bash install.sh --admin-pin 8432
 ```
 
-Most browsers require HTTPS for screen capture on non-localhost pages. If HTTP screen sharing fails from another laptop, reinstall with `--with-https` or put Fluid behind your own HTTPS reverse proxy.
+To skip HTTPS for a lab-only setup:
+
+```bash
+sudo bash install.sh --admin-pin 8432 --no-https
+```
+
+Most browsers require HTTPS for screen capture on non-localhost pages. The installer handles this automatically unless you pass `--no-https`.
 
 ## Use It
 
 Open these from a device on the same network:
 
 ```text
-http://<pi-ip>:3000/client.html
-http://<pi-ip>:3000/admin.html
-```
-
-If HTTPS was enabled:
-
-```text
 https://<pi-ip>/client.html
 https://<pi-ip>/admin.html
+```
+
+If you installed with `--no-https` for local testing:
+
+```text
+http://<pi-ip>:3000/client.html
+http://<pi-ip>:3000/admin.html
 ```
 
 The display view normally launches automatically on the Pi HDMI output. You can also open:
@@ -104,7 +110,8 @@ SERVER_PORT=3000
 ADMIN_PIN=8432
 MAX_DEVICES=20
 LOG_FILE=/var/log/fluid/server.log
-CHROMIUM_BIN=/usr/bin/chromium-browser
+CHROMIUM_BIN=/usr/bin/chromium
+HTTPS_REDIRECT=true
 ```
 
 After changing config:
@@ -156,7 +163,8 @@ npm run doctor
 --max-devices N       Max client devices, default 20
 --install-dir PATH    Install directory, default /opt/fluid
 --user NAME           Service user, default Fluid
---with-https          Install nginx reverse proxy with a self-signed cert
+--with-https          Install nginx reverse proxy with a self-signed cert, default
+--no-https            Skip HTTPS reverse proxy setup
 --https-name NAME     Certificate name/CN, default fluid.local
 --no-reboot           Do not prompt for reboot
 --no-start            Install only; do not start services
@@ -190,6 +198,8 @@ npm run doctor
 | Problem | Fix |
 | --- | --- |
 | Screen share button fails | Use HTTPS, Chrome/Edge/Firefox, and allow screen capture permission. |
+| Page says screen sharing is blocked | Open `https://<pi-ip>/client.html`, not `http://<pi-ip>:3000/client.html`. |
+| Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Display stays on standby | Open admin panel and select a connected device. |
 | Admin PIN does not work | Check `/etc/fluid/fluid.env`, then restart `fluid-server`. |
 | Kiosk does not launch | Run `sudo journalctl -u fluid-display -f` and confirm Chromium is installed. |

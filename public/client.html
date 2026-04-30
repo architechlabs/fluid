@@ -122,6 +122,7 @@
     margin-bottom: 14px; display: none;
   }
   .alert.visible { display: block; }
+  .alert a { color: inherit; font-weight: 700; }
   .alert-warn { background: rgba(234,179,8,.12); border: 1px solid rgba(234,179,8,.3); color: var(--yellow); }
   .alert-err { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); color: var(--red); }
 </style>
@@ -206,10 +207,15 @@ function setStatus(text, dotClass) {
   dot.className = 'dot ' + (dotClass || '');
 }
 
-function showAlert(el, msg) {
+function showAlert(el, msg, duration = 6000) {
   el.textContent = msg;
   el.classList.add('visible');
-  setTimeout(() => el.classList.remove('visible'), 6000);
+  if (duration > 0) setTimeout(() => el.classList.remove('visible'), duration);
+}
+
+function showAlertHtml(el, html) {
+  el.innerHTML = html;
+  el.classList.add('visible');
 }
 
 function detectPlatform() {
@@ -222,6 +228,31 @@ function detectPlatform() {
   return 'Unknown';
 }
 
+function secureShareUrl() {
+  return `https://${location.hostname}/client.html`;
+}
+
+function getShareBlockReason() {
+  if (!window.isSecureContext) {
+    return `Screen sharing is blocked because this page is open over HTTP. Open <a href="${secureShareUrl()}">the secure Fluid page</a>, accept the local certificate warning once, then start sharing.`;
+  }
+  if (!navigator.mediaDevices?.getDisplayMedia) {
+    return 'This browser does not expose screen sharing. Use a current desktop browser with screen capture enabled.';
+  }
+  return '';
+}
+
+function updateShareAvailability() {
+  const reason = getShareBlockReason();
+  if (reason) {
+    showAlertHtml(alertErr, reason);
+    startBtn.disabled = true;
+    return false;
+  }
+  alertErr.classList.remove('visible');
+  return true;
+}
+
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 function connect() {
   clearTimeout(state.reconnectTimer);
@@ -231,7 +262,7 @@ function connect() {
 
   ws.addEventListener('open', () => {
     setStatus('Connected — enter your name and start', 'connected');
-    startBtn.disabled = false;
+    startBtn.disabled = !updateShareAvailability();
     state.reconnectDelay = 2000;
     if (state.registered && state.sharing) {
       // Re-register after reconnect
@@ -324,9 +355,9 @@ async function startSharing() {
   const name = $('deviceName').value.trim();
   if (!name) { showAlert(alertWarn, 'Please enter your device name.'); return; }
 
-  // Check browser support
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    showAlert(alertErr, 'Screen sharing is not supported in this browser. Please use Chrome, Edge, or Firefox.');
+  const blockReason = getShareBlockReason();
+  if (blockReason) {
+    showAlertHtml(alertErr, blockReason);
     return;
   }
 
@@ -441,10 +472,7 @@ $('deviceName').addEventListener('change', () => {
   localStorage.setItem('Fluid-name', $('deviceName').value.trim());
 });
 
-// Check HTTPS warning
-if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-  showAlert(alertWarn, 'Note: Screen sharing requires HTTPS on most browsers when not on localhost. If sharing fails, try accessing via HTTPS.');
-}
+updateShareAvailability();
 
 connect();
 </script>

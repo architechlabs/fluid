@@ -22,6 +22,7 @@ const LOG_FILE    = process.env.LOG_FILE || path.join(__dirname, 'logs', 'server
 const MAX_DEVICES = readIntEnv('MAX_DEVICES', 20, 1, 250);
 const PUBLIC_DIR  = path.join(__dirname, 'public');
 const INDEX_FILE  = path.join(PUBLIC_DIR, 'index.html');
+const HTTPS_REDIRECT = readBoolEnv('HTTPS_REDIRECT', false);
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -48,6 +49,12 @@ function readIntEnv(name, fallback, min, max) {
     return fallback;
   }
   return value;
+}
+
+function readBoolEnv(name, fallback) {
+  const value = process.env[name];
+  if (value === undefined) return fallback;
+  return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
 }
 
 // ─── Logging ─────────────────────────────────────────────────────────────────
@@ -82,6 +89,17 @@ const wss    = new WebSocket.Server({ server, path: '/ws' });
 
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
+app.use((req, res, next) => {
+  if (!HTTPS_REDIRECT || req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    return next();
+  }
+
+  const host = String(req.headers.host || '').replace(/:\d+$/, '');
+  const localHost = ['localhost', '127.0.0.1', '::1'].includes(host);
+  if (!host || localHost || req.path.startsWith('/api/health')) return next();
+
+  return res.redirect(308, `https://${host}${req.originalUrl}`);
+});
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
