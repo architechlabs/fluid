@@ -186,7 +186,7 @@ const state = {
   ws: null, deviceId: null, pcs: new Map(),
   stream: null, reconnectTimer: null,
   reconnectDelay: 2000, maxReconnect: 30000,
-  sharing: false, registered: false,
+  sharing: false, registered: false, pendingStreamStart: false,
 };
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -267,6 +267,7 @@ function connect() {
     state.reconnectDelay = 2000;
     if (state.registered && state.sharing) {
       // Re-register after reconnect
+      state.pendingStreamStart = true;
       doRegister();
     }
   });
@@ -307,14 +308,23 @@ async function handleMessage(msg) {
 
     case 'welcome':
       // Auto-register if name is already filled and we were sharing
-      if (state.sharing && $('deviceName').value.trim()) doRegister();
+      if (state.sharing && $('deviceName').value.trim()) {
+        state.pendingStreamStart = true;
+        doRegister();
+      }
       break;
 
     case 'registered':
       state.deviceId   = msg.deviceId;
       state.registered = true;
       setStatus(`Registered as "${msg.name}"`, 'connected');
-      if (state.sharing) setStatus('Sharing screen…', 'streaming');
+      if (state.sharing) {
+        setStatus('Sharing screen…', 'streaming');
+        if (state.pendingStreamStart) {
+          state.pendingStreamStart = false;
+          send({ type: 'stream-started' });
+        }
+      }
       break;
 
     case 'rtc-offer': {
@@ -380,9 +390,10 @@ async function startSharing() {
     $('statRes').textContent = `${settings.width}×${settings.height}`;
     $('statFps').textContent = `${settings.frameRate || '—'} fps`;
 
-    // Register with server
+    // Register first; the server will mark us streaming after it confirms the
+    // device id, avoiding a race that could leave the first sharer blank.
+    state.pendingStreamStart = true;
     doRegister();
-    send({ type: 'stream-started' });
 
     // UI swap
     setupView.style.display  = 'none';
@@ -459,6 +470,7 @@ function closeAllPeers() {
 function stopSharing() {
   state.sharing = false;
   state.registered = false;
+  state.pendingStreamStart = false;
   if (state.stream) {
     state.stream.getTracks().forEach(t => t.stop());
     state.stream = null;

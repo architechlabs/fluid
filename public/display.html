@@ -183,6 +183,7 @@ const state = {
   devices: [],
   pcs: new Map(),
   retryTimers: new Map(),
+  trackTimers: new Map(),
   reconcileTimer: null,
 };
 
@@ -288,6 +289,8 @@ function closePeer(deviceId) {
   state.pcs.delete(deviceId);
   clearTimeout(state.retryTimers.get(deviceId));
   state.retryTimers.delete(deviceId);
+  clearTimeout(state.trackTimers.get(deviceId));
+  state.trackTimers.delete(deviceId);
   document.getElementById(tileId(deviceId))?.remove();
   setGrid(getStreamingDevices().length);
   updateStandby();
@@ -297,6 +300,8 @@ function resetPeer(deviceId) {
   const pc = state.pcs.get(deviceId);
   if (pc) pc.close();
   state.pcs.delete(deviceId);
+  clearTimeout(state.trackTimers.get(deviceId));
+  state.trackTimers.delete(deviceId);
 }
 
 function scheduleRetry(deviceId, delay = 1200) {
@@ -321,7 +326,14 @@ async function initiateRtc(deviceId) {
     scheduleReconcile();
     return;
   }
-  if (state.pcs.has(deviceId)) return;
+  if (state.pcs.has(deviceId)) {
+    const tile = document.getElementById(tileId(deviceId));
+    if (tile?.classList.contains('waiting')) {
+      resetPeer(deviceId);
+    } else {
+      return;
+    }
+  }
 
   const pc = new RTCPeerConnection({
     iceServers: [
@@ -335,6 +347,8 @@ async function initiateRtc(deviceId) {
   pc.addEventListener('track', ev => {
     clearTimeout(state.retryTimers.get(deviceId));
     state.retryTimers.delete(deviceId);
+    clearTimeout(state.trackTimers.get(deviceId));
+    state.trackTimers.delete(deviceId);
     const tile = ensureTile(device);
     tile.classList.remove('waiting');
     tile.innerHTML = '';
@@ -377,6 +391,15 @@ async function initiateRtc(deviceId) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     send({ type: 'rtc-offer', offer: pc.localDescription, targetDeviceId: deviceId });
+    const trackTimer = setTimeout(() => {
+      const tile = document.getElementById(tileId(deviceId));
+      const stillStreaming = state.devices.some(d => d.id === deviceId && d.status === 'streaming');
+      if (stillStreaming && tile?.classList.contains('waiting')) {
+        resetPeer(deviceId);
+        scheduleRetry(deviceId, 500);
+      }
+    }, 5000);
+    state.trackTimers.set(deviceId, trackTimer);
   } catch (err) {
     console.warn('RTC start failed', err);
     resetPeer(deviceId);
@@ -432,6 +455,10 @@ async function handleMessage(msg) {
     case 'initiate-rtc':
       mergeDevice(msg.device);
       scheduleReconcile();
+      if (state.pcs.has(msg.deviceId)) {
+        const tile = document.getElementById(tileId(msg.deviceId));
+        if (tile?.classList.contains('waiting')) resetPeer(msg.deviceId);
+      }
       await initiateRtc(msg.deviceId);
       break;
 

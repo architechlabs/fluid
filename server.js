@@ -106,6 +106,9 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'same-origin');
+  if (req.path === '/' || req.path.endsWith('.html')) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  }
   next();
 });
 app.use(express.static(PUBLIC_DIR, {
@@ -215,6 +218,13 @@ function initiateDeviceDisplay(deviceId, reason) {
   return true;
 }
 
+function syncDisplayWall(reason) {
+  const streamingIds = getStreamingDeviceIds();
+  broadcastDeviceUpdate();
+  if (!displayOnline() || streamingIds.length === 0) return;
+  streamingIds.forEach(id => initiateDeviceDisplay(id, reason));
+}
+
 function getServerInfo() {
   const ifaces = os.networkInterfaces();
   const ips = [];
@@ -288,6 +298,14 @@ const heartbeatInterval = setInterval(() => {
 }, 15000);
 
 wss.on('close', () => clearInterval(heartbeatInterval));
+
+const wallSyncInterval = setInterval(() => {
+  if (displayOnline() && getStreamingDeviceIds().length > 0) {
+    syncDisplayWall('Periodic sync');
+  }
+}, 5000);
+
+wss.on('close', () => clearInterval(wallSyncInterval));
 
 // ─── Message Router ───────────────────────────────────────────────────────────
 function handleMessage(ws, data) {
@@ -368,10 +386,9 @@ function handleMessage(ws, data) {
       if (ws.role !== 'admin') { safeSend(ws, { type: 'error', message: 'Unauthorized' }); return; }
       const { deviceId } = data;
       if (deviceId === null || deviceId === undefined) {
-        broadcastDeviceUpdate();
-        getStreamingDeviceIds().forEach(id => initiateDeviceDisplay(id, 'Admin sync'));
-        logger.info('Admin synced display wall');
-        return;
+      syncDisplayWall('Admin sync');
+      logger.info('Admin synced display wall');
+      return;
       }
       if (!devices.has(deviceId)) {
         safeSend(ws, { type: 'error', message: 'Device not found' });
@@ -383,8 +400,7 @@ function handleMessage(ws, data) {
 
     case 'sync-display': {
       if (ws.role !== 'admin') { safeSend(ws, { type: 'error', message: 'Unauthorized' }); return; }
-      broadcastDeviceUpdate();
-      getStreamingDeviceIds().forEach(id => initiateDeviceDisplay(id, 'Admin sync'));
+      syncDisplayWall('Admin sync');
       logger.info('Admin synced display wall');
       break;
     }
@@ -473,10 +489,7 @@ function handleMessage(ws, data) {
       if (dev) dev.status = 'streaming';
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: true });
       logger.info(`Stream started  deviceId=${ws.deviceId}`);
-      broadcastDeviceUpdate();
-      if (displayOnline()) {
-        initiateDeviceDisplay(ws.deviceId, 'Auto');
-      }
+      syncDisplayWall('Auto sync');
       break;
     }
 
