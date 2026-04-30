@@ -142,6 +142,23 @@ choose_app_port() {
   fi
 }
 
+stop_existing_services() {
+  step "Stopping existing services"
+  systemctl stop fluid-display.service >/dev/null 2>&1 || true
+  systemctl stop fluid-server.service >/dev/null 2>&1 || true
+  systemctl stop nginx.service >/dev/null 2>&1 || true
+  log "Existing Fluid/nginx services stopped"
+}
+
+show_port_owner() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp "sport = :${port}" 2>/dev/null || true
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true
+  fi
+}
+
 install_packages() {
   step "Installing system packages"
   apt-get update -qq
@@ -313,12 +330,16 @@ configure_https() {
   HTTPS_NAME="${HTTPS_NAME:-fluid.local}"
   apt-get install -y -qq nginx openssl
 
+  rm -f \
+    /etc/nginx/sites-enabled/fluid \
+    /etc/nginx/sites-available/fluid \
+    /etc/nginx/sites-enabled/default
+
   local ssl_listen_lines
   if [[ "$SERVER_PORT" == "443" ]]; then
     ssl_listen_lines="    listen 443 ssl;"
   else
-    ssl_listen_lines="    listen 443 ssl;
-    listen ${SERVER_PORT} ssl;"
+    ssl_listen_lines="    listen ${SERVER_PORT} ssl;"
   fi
 
   local redirect_target
@@ -360,10 +381,16 @@ server {
 EOF
 
   ln -sf /etc/nginx/sites-available/fluid /etc/nginx/sites-enabled/fluid
-  rm -f /etc/nginx/sites-enabled/default
   nginx -t
   systemctl enable nginx
-  systemctl restart nginx
+  if ! systemctl restart nginx; then
+    warn "nginx could not start. Port ${SERVER_PORT} or port 80 may already be in use."
+    info "Port ${SERVER_PORT}:"
+    show_port_owner "$SERVER_PORT"
+    info "Port 80:"
+    show_port_owner 80
+    err "Fix the port conflict above, or re-run with a different --port."
+  fi
   log "HTTPS ready with self-signed certificate CN=${HTTPS_NAME}"
 }
 
@@ -437,6 +464,7 @@ main() {
   prompt_if_needed
   validate_config
   choose_app_port
+  stop_existing_services
   install_packages
   install_node
   create_user_and_dirs

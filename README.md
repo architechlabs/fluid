@@ -211,6 +211,7 @@ npm run doctor
 | --- | --- |
 | Screen share button fails | Use HTTPS, Chrome/Edge/Firefox, and allow screen capture permission. |
 | `ERR_SSL_PROTOCOL_ERROR` on `https://<pi-ip>:<port>` | Re-run the latest installer. The chosen port must be served by nginx HTTPS, with Node on an internal port. |
+| nginx fails to start during install | Re-run the latest installer. It stops old Fluid services before nginx binds the public HTTPS port and prints any remaining port owner. |
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Display stays on standby | Open admin panel and select a connected device. |
