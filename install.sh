@@ -23,8 +23,8 @@ ADMIN_PIN=""
 MAX_DEVICES="20"
 WITH_HTTPS="true"
 HTTPS_NAME=""
-KIOSK_WIDTH="1920"
-KIOSK_HEIGHT="1080"
+KIOSK_WIDTH=""
+KIOSK_HEIGHT=""
 NO_REBOOT="false"
 NO_START="false"
 ASSUME_YES="false"
@@ -52,7 +52,7 @@ Options:
   --with-https          Install nginx reverse proxy with a self-signed cert. Default.
   --no-https            Skip HTTPS reverse proxy setup.
   --https-name NAME     Certificate name/CN. Default: fluid.local.
-  --kiosk-size WxH      HDMI kiosk viewport. Default: 1920x1080.
+  --kiosk-size WxH      Force HDMI kiosk viewport. Default: auto-detect.
   --no-reboot           Do not prompt for reboot.
   --no-start            Install only; do not start services.
   -y, --yes             Use safe defaults for prompts.
@@ -126,10 +126,12 @@ validate_config() {
   fi
   is_number "$MAX_DEVICES" || err "Max devices must be a number."
   (( MAX_DEVICES >= 1 && MAX_DEVICES <= 250 )) || err "Max devices must be between 1 and 250."
-  is_number "$KIOSK_WIDTH" || err "Kiosk width must be a number."
-  is_number "$KIOSK_HEIGHT" || err "Kiosk height must be a number."
-  (( KIOSK_WIDTH >= 640 && KIOSK_WIDTH <= 7680 )) || err "Kiosk width must be between 640 and 7680."
-  (( KIOSK_HEIGHT >= 480 && KIOSK_HEIGHT <= 4320 )) || err "Kiosk height must be between 480 and 4320."
+  if [[ -n "$KIOSK_WIDTH" || -n "$KIOSK_HEIGHT" ]]; then
+    is_number "$KIOSK_WIDTH" || err "Kiosk width must be a number."
+    is_number "$KIOSK_HEIGHT" || err "Kiosk height must be a number."
+    (( KIOSK_WIDTH >= 640 && KIOSK_WIDTH <= 7680 )) || err "Kiosk width must be between 640 and 7680."
+    (( KIOSK_HEIGHT >= 480 && KIOSK_HEIGHT <= 4320 )) || err "Kiosk height must be between 480 and 4320."
+  fi
   [[ -n "$ADMIN_PIN" ]] || err "Admin PIN cannot be empty."
 
   if [[ "$ADMIN_PIN" == "0000" ]]; then
@@ -288,11 +290,16 @@ MAX_DEVICES=${MAX_DEVICES}
 LOG_FILE=${LOG_DIR}/server.log
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
-KIOSK_WIDTH=${KIOSK_WIDTH}
-KIOSK_HEIGHT=${KIOSK_HEIGHT}
 # Override to force the kiosk to open a different address:
 SERVER_URL=${kiosk_url}
 EOF
+
+  if [[ -n "$KIOSK_WIDTH" && -n "$KIOSK_HEIGHT" ]]; then
+    {
+      printf "KIOSK_WIDTH=%s\n" "$KIOSK_WIDTH"
+      printf "KIOSK_HEIGHT=%s\n" "$KIOSK_HEIGHT"
+    } >> "$CONFIG_DIR/fluid.env"
+  fi
 
   chmod 640 "$CONFIG_DIR/fluid.env"
   chown root:"$SERVICE_USER" "$CONFIG_DIR/fluid.env" || true
@@ -340,6 +347,12 @@ set_boot_config() {
   fi
 }
 
+unset_boot_config() {
+  local file="$1"
+  local key="$2"
+  sed -i "/^${key}=.*/d" "$file"
+}
+
 configure_boot() {
   step "Configuring Raspberry Pi display settings"
   raspi-config nonint do_boot_behaviour B2 >/dev/null 2>&1 || true
@@ -350,8 +363,13 @@ configure_boot() {
     set_boot_config "$config_file" "gpu_mem" "128"
     set_boot_config "$config_file" "disable_overscan" "1"
     set_boot_config "$config_file" "hdmi_force_hotplug" "1"
-    set_boot_config "$config_file" "framebuffer_width" "$KIOSK_WIDTH"
-    set_boot_config "$config_file" "framebuffer_height" "$KIOSK_HEIGHT"
+    if [[ -n "$KIOSK_WIDTH" && -n "$KIOSK_HEIGHT" ]]; then
+      set_boot_config "$config_file" "framebuffer_width" "$KIOSK_WIDTH"
+      set_boot_config "$config_file" "framebuffer_height" "$KIOSK_HEIGHT"
+    else
+      unset_boot_config "$config_file" "framebuffer_width"
+      unset_boot_config "$config_file" "framebuffer_height"
+    fi
     log "Updated ${config_file}"
   else
     warn "Could not find Raspberry Pi boot config; skipped GPU/overscan tuning."

@@ -9,16 +9,26 @@ xset s off
 xset s noblank
 xset -dpms
 
-# Keep the X desktop and Chromium viewport pinned to the HDMI panel instead of
-# letting Chromium inherit a bad half-width framebuffer from a previous boot.
-KIOSK_WIDTH="${KIOSK_WIDTH:-1920}"
-KIOSK_HEIGHT="${KIOSK_HEIGHT:-1080}"
+# Keep the X desktop and Chromium viewport pinned to the active HDMI panel.
+# If KIOSK_WIDTH/HEIGHT are not configured, use the current X mode so 4K TVs
+# do not end up with a 1080p Chromium window stuck in the top-left corner.
+KIOSK_WIDTH="${KIOSK_WIDTH:-}"
+KIOSK_HEIGHT="${KIOSK_HEIGHT:-}"
 if command -v xrandr >/dev/null 2>&1; then
   PRIMARY_OUTPUT="$(xrandr --query | awk '/ connected/{print $1; exit}')"
   if [ -n "$PRIMARY_OUTPUT" ]; then
     xrandr --output "$PRIMARY_OUTPUT" --auto --pos 0x0 --scale 1x1 2>/dev/null || true
   fi
+  if [ -z "$KIOSK_WIDTH" ] || [ -z "$KIOSK_HEIGHT" ]; then
+    CURRENT_MODE="$(xrandr --query | awk '/\*/{print $1; exit}')"
+    if echo "$CURRENT_MODE" | grep -Eq '^[0-9]+x[0-9]+$'; then
+      KIOSK_WIDTH="${CURRENT_MODE%x*}"
+      KIOSK_HEIGHT="${CURRENT_MODE#*x}"
+    fi
+  fi
 fi
+KIOSK_WIDTH="${KIOSK_WIDTH:-1920}"
+KIOSK_HEIGHT="${KIOSK_HEIGHT:-1080}"
 
 # Hide cursor (requires unclutter)
 command -v unclutter >/dev/null 2>&1 && unclutter -idle 1 -root &

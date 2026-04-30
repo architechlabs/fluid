@@ -107,13 +107,13 @@ http://<pi-ip>:3000/display.html
 
 After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When laptops start sharing, Fluid automatically shows every live screen on HDMI in a responsive wall. One live device fills the screen, two devices split side-by-side, four devices become a 2x2 wall, sixteen devices become a 4x4 wall, and larger groups continue fitting into a grid.
 
-The installer pins the kiosk viewport to `1920x1080` by default and writes matching Raspberry Pi framebuffer settings. For a different TV mode, reinstall with:
+The kiosk auto-detects the active HDMI resolution by default. Only force a size if your TV reports the wrong mode:
 
 ```bash
 sudo bash install.sh --kiosk-size 3840x2160
 ```
 
-Or edit `/etc/fluid/fluid.env`:
+Or edit `/etc/fluid/fluid.env` to force a known mode:
 
 ```text
 KIOSK_WIDTH=1920

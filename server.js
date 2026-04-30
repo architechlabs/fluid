@@ -118,8 +118,8 @@ app.use(express.static(PUBLIC_DIR, {
 const devices = new Map();
 // Set<WebSocket> — admin/observer connections
 const adminSockets = new Set();
-// The single Pi display WebSocket
-let displayWs     = null;
+// Map<displayId, WebSocket> — Pi HDMI display plus optional browser display viewers.
+const displaySockets = new Map();
 
 // Stats
 const stats = {
@@ -141,7 +141,15 @@ function broadcastAdmins(data) {
 }
 
 function broadcastDisplay(data) {
-  safeSend(displayWs, data);
+  displaySockets.forEach(ws => safeSend(ws, data));
+}
+
+function displayCount() {
+  return displaySockets.size;
+}
+
+function displayOnline() {
+  return displayCount() > 0;
 }
 
 function getDeviceList() {
@@ -196,7 +204,14 @@ function initiateDeviceDisplay(deviceId, reason) {
   if (!devices.has(deviceId)) return false;
   const dev = devices.get(deviceId);
   logger.info(`${reason} display start  id=${deviceId}  name="${dev.name}"`);
-  broadcastDisplay({ type: 'initiate-rtc', deviceId, device: serializeDevice(deviceId) });
+  displaySockets.forEach(display => {
+    safeSend(display, {
+      type: 'initiate-rtc',
+      deviceId,
+      device: serializeDevice(deviceId),
+      displayId: display.displayId,
+    });
+  });
   return true;
 }
 
@@ -280,25 +295,23 @@ function handleMessage(ws, data) {
 
     // ── Display registration (Pi Chromium kiosk) ──
     case 'register-display': {
-      if (displayWs && displayWs !== ws && displayWs.readyState === WebSocket.OPEN) {
-        logger.warn('Second display attempted — terminating old one');
-        displayWs.close(1000, 'Replaced by new display');
-      }
-      displayWs  = ws;
-      ws.role    = 'display';
-      logger.info('Display registered');
+      ws.role = 'display';
+      ws.displayId = ws.clientId;
+      displaySockets.set(ws.displayId, ws);
+      logger.info(`Display registered  id=${ws.displayId}`);
       // Send current state
       safeSend(ws, {
         type:           'display-welcome',
+        displayId:      ws.displayId,
         devices:        getDeviceList(),
         activeDeviceId: getStreamingDeviceIds()[0] || null,
         activeDeviceIds: getStreamingDeviceIds(),
         serverInfo:     getServerInfo(),
       });
       getStreamingDeviceIds().forEach(deviceId => {
-        safeSend(ws, { type: 'initiate-rtc', deviceId, device: serializeDevice(deviceId) });
+        safeSend(ws, { type: 'initiate-rtc', deviceId, device: serializeDevice(deviceId), displayId: ws.displayId });
       });
-      broadcastAdmins({ type: 'display-status', connected: true });
+      broadcastAdmins({ type: 'display-status', connected: true, count: displayCount() });
       break;
     }
 
@@ -344,7 +357,8 @@ function handleMessage(ws, data) {
         activeDeviceId: getStreamingDeviceIds()[0] || null,
         activeDeviceIds: getStreamingDeviceIds(),
         serverInfo:    getServerInfo(),
-        displayOnline: displayWs?.readyState === WebSocket.OPEN,
+        displayOnline: displayOnline(),
+        displayCount:  displayCount(),
       });
       break;
     }
@@ -412,24 +426,42 @@ function handleMessage(ws, data) {
     case 'rtc-offer': {
       if (ws.role !== 'display') return;
       const target = devices.get(data.targetDeviceId);
-      if (target) safeSend(target.ws, { type: 'rtc-offer', offer: data.offer });
+      if (target) {
+        safeSend(target.ws, {
+          type: 'rtc-offer',
+          offer: data.offer,
+          displayId: ws.displayId,
+        });
+      }
       break;
     }
 
     // Client → Display
     case 'rtc-answer': {
       if (ws.role !== 'client') return;
-      safeSend(displayWs, { type: 'rtc-answer', answer: data.answer, fromDeviceId: ws.deviceId });
+      const display = displaySockets.get(data.displayId);
+      safeSend(display, {
+        type: 'rtc-answer',
+        answer: data.answer,
+        fromDeviceId: ws.deviceId,
+        displayId: data.displayId,
+      });
       break;
     }
 
     // Bidirectional ICE
     case 'rtc-ice': {
       if (ws.role === 'client') {
-        safeSend(displayWs, { type: 'rtc-ice', candidate: data.candidate, fromDeviceId: ws.deviceId });
+        const display = displaySockets.get(data.displayId);
+        safeSend(display, {
+          type: 'rtc-ice',
+          candidate: data.candidate,
+          fromDeviceId: ws.deviceId,
+          displayId: data.displayId,
+        });
       } else if (ws.role === 'display') {
         const target = devices.get(data.targetDeviceId);
-        if (target) safeSend(target.ws, { type: 'rtc-ice', candidate: data.candidate });
+        if (target) safeSend(target.ws, { type: 'rtc-ice', candidate: data.candidate, displayId: ws.displayId });
       }
       break;
     }
@@ -442,7 +474,7 @@ function handleMessage(ws, data) {
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: true });
       logger.info(`Stream started  deviceId=${ws.deviceId}`);
       broadcastDeviceUpdate();
-      if (displayWs?.readyState === WebSocket.OPEN) {
+      if (displayOnline()) {
         initiateDeviceDisplay(ws.deviceId, 'Auto');
       }
       break;
@@ -468,9 +500,9 @@ function handleMessage(ws, data) {
 function handleDisconnect(ws) {
   switch (ws.role) {
     case 'display':
-      displayWs = null;
-      broadcastAdmins({ type: 'display-status', connected: false });
-      logger.info('Display disconnected');
+      if (ws.displayId) displaySockets.delete(ws.displayId);
+      broadcastAdmins({ type: 'display-status', connected: displayOnline(), count: displayCount() });
+      logger.info(`Display disconnected  id=${ws.displayId || 'unknown'}`);
       break;
 
     case 'client':
@@ -498,7 +530,8 @@ app.get('/api/health', (req, res) => {
     devices:       devices.size,
     activeDevice:  getStreamingDeviceIds()[0] || null,
     activeDevices: getStreamingDeviceIds(),
-    displayOnline: displayWs?.readyState === WebSocket.OPEN,
+    displayOnline: displayOnline(),
+    displayCount:  displayCount(),
     serverInfo:    getServerInfo(),
   });
 });

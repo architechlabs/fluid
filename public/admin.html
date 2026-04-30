@@ -414,7 +414,7 @@ function handleMsg(msg) {
       activeDeviceIds = msg.activeDeviceIds || (msg.activeDeviceId ? [msg.activeDeviceId] : []);
       renderDevices();
       updateServerInfo(msg.serverInfo);
-      updateDisplayStatus(msg.displayOnline);
+      updateDisplayStatus(msg.displayOnline, msg.displayCount);
       addLog(`Admin authenticated — ${devices.length} device(s) online`);
       break;
 
@@ -426,8 +426,8 @@ function handleMsg(msg) {
       break;
 
     case 'display-status':
-      updateDisplayStatus(msg.connected);
-      addLog(`Display ${msg.connected ? 'connected' : 'disconnected'}`, msg.connected ? 'info' : 'warn');
+      updateDisplayStatus(msg.connected, msg.count);
+      addLog(`Display ${msg.connected ? 'connected' : 'disconnected'}${msg.count ? ` (${msg.count})` : ''}`, msg.connected ? 'info' : 'warn');
       break;
 
     case 'device-streaming':
@@ -522,10 +522,10 @@ function updateUptime(secs) {
   $('sideUptime').textContent = upStr;
 }
 
-function updateDisplayStatus(online) {
+function updateDisplayStatus(online, count) {
   const el = $('sideDisplay');
   el.className = 'pill ' + (online ? 'green' : 'red');
-  el.textContent = online ? 'Online' : 'Offline';
+  el.textContent = online ? (count > 1 ? `${count} Online` : 'Online') : 'Offline';
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -585,7 +585,7 @@ function fetchStats() {
     .then(r => r.json())
     .then(d => {
       updateUptime(d.uptime);
-      updateDisplayStatus(d.displayOnline);
+      updateDisplayStatus(d.displayOnline, d.displayCount);
     })
     .catch(() => {});
 }

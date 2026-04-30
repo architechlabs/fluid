@@ -183,7 +183,7 @@
 
 // ─── State ────────────────────────────────────────────────────────────────────
 const state = {
-  ws: null, deviceId: null, pc: null,
+  ws: null, deviceId: null, pcs: new Map(),
   stream: null, reconnectTimer: null,
   reconnectDelay: 2000, maxReconnect: 30000,
   sharing: false, registered: false,
@@ -319,13 +319,14 @@ async function handleMessage(msg) {
 
     case 'rtc-offer': {
       // Display wants to connect — create answer
-      await handleOffer(msg.offer);
+      await handleOffer(msg.offer, msg.displayId);
       break;
     }
 
     case 'rtc-ice': {
-      if (msg.candidate && state.pc) {
-        try { await state.pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
+      const pc = state.pcs.get(msg.displayId);
+      if (msg.candidate && pc) {
+        try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)); }
         catch (e) { console.warn('ICE add error:', e); }
       }
       break;
@@ -402,11 +403,10 @@ async function startSharing() {
   }
 }
 
-async function handleOffer(offer) {
-  if (!state.stream) return;
+async function handleOffer(offer, displayId) {
+  if (!state.stream || !displayId) return;
 
-  // Close old connection
-  if (state.pc) { state.pc.close(); state.pc = null; }
+  closePeer(displayId);
 
   const pc = new RTCPeerConnection({
     iceServers: [
@@ -414,7 +414,7 @@ async function handleOffer(offer) {
       { urls: 'stun:stun1.l.google.com:19302' },
     ],
   });
-  state.pc = pc;
+  state.pcs.set(displayId, pc);
 
   // Add tracks
   state.stream.getTracks().forEach(t => pc.addTrack(t, state.stream));
@@ -422,7 +422,7 @@ async function handleOffer(offer) {
   // ICE candidates → server
   pc.addEventListener('icecandidate', ev => {
     if (ev.candidate) {
-      send({ type: 'rtc-ice', candidate: ev.candidate });
+      send({ type: 'rtc-ice', candidate: ev.candidate, displayId });
     }
   });
 
@@ -431,13 +431,29 @@ async function handleOffer(offer) {
       setStatus('Streaming to display ✓', 'streaming');
     } else if (['disconnected','failed'].includes(pc.connectionState)) {
       setStatus('RTC disconnected — waiting for display…', 'connected');
+      closePeer(displayId);
     }
   });
 
-  await pc.setRemoteDescription(new RTCSessionDescription(offer));
-  const answer = await pc.createAnswer();
-  await pc.setLocalDescription(answer);
-  send({ type: 'rtc-answer', answer: pc.localDescription });
+  try {
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    send({ type: 'rtc-answer', answer: pc.localDescription, displayId });
+  } catch (err) {
+    console.warn('RTC answer failed:', err);
+    closePeer(displayId);
+  }
+}
+
+function closePeer(displayId) {
+  const pc = state.pcs.get(displayId);
+  if (pc) pc.close();
+  state.pcs.delete(displayId);
+}
+
+function closeAllPeers() {
+  for (const displayId of [...state.pcs.keys()]) closePeer(displayId);
 }
 
 function stopSharing() {
@@ -447,7 +463,7 @@ function stopSharing() {
     state.stream.getTracks().forEach(t => t.stop());
     state.stream = null;
   }
-  if (state.pc) { state.pc.close(); state.pc = null; }
+  closeAllPeers();
   preview.srcObject = null;
   send({ type: 'stream-stopped' });
   setupView.style.display  = 'block';
