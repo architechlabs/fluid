@@ -174,7 +174,9 @@ install_packages() {
     unclutter \
     wget \
     xdotool \
-    xorg
+    xinit \
+    xorg \
+    xserver-xorg-legacy
 
   if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
     local chromium_package=""
@@ -219,6 +221,16 @@ create_user_and_dirs() {
   mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
   chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
   chmod 755 "$LOG_DIR"
+}
+
+configure_xorg_kiosk() {
+  step "Configuring HDMI kiosk session"
+  mkdir -p /etc/X11
+  cat > /etc/X11/Xwrapper.config <<EOF
+allowed_users=anybody
+needs_root_rights=yes
+EOF
+  log "Xorg kiosk permissions configured"
 }
 
 install_app() {
@@ -468,6 +480,7 @@ main() {
   install_packages
   install_node
   create_user_and_dirs
+  configure_xorg_kiosk
   install_app
   write_config
   install_services

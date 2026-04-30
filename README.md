@@ -9,6 +9,7 @@ Users open one page from any laptop on the same network, share their screen, and
 - Browser screen sharing with no client app to install
 - Admin dashboard with PIN access
 - Full-screen HDMI display mode for the Pi
+- Auto-display of the first active shared screen on HDMI
 - WebRTC peer connection over LAN
 - Systemd services that start on boot
 - One installer that configures Node.js, Chromium, Xorg, logs, services, and HTTPS
@@ -100,6 +101,20 @@ The display view normally launches automatically on the Pi HDMI output. You can 
 ```text
 http://<pi-ip>:3000/display.html
 ```
+
+## HDMI Display
+
+After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When a laptop starts sharing, Fluid automatically shows the first active shared screen on HDMI. The admin panel is still available when you want to switch devices manually.
+
+If the TV still shows the Raspberry Pi terminal:
+
+```bash
+sudo systemctl status fluid-display
+sudo journalctl -u fluid-display -n 80 --no-pager
+sudo systemctl restart fluid-display
+```
+
+The installer configures Xorg kiosk permissions for Pi OS Lite using `/etc/X11/Xwrapper.config`.
 
 ## Native Cast Menu
 
@@ -215,6 +230,7 @@ npm run doctor
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Display stays on standby | Open admin panel and select a connected device. |
+| TV shows Raspberry Pi terminal | Restart the display service with `sudo systemctl restart fluid-display`, then check `sudo journalctl -u fluid-display -n 80 --no-pager`. |
 | Admin PIN does not work | Check `/etc/fluid/fluid.env`, then restart `fluid-server`. |
 | Kiosk does not launch | Run `sudo journalctl -u fluid-display -f` and confirm Chromium is installed. |
 | Server does not start | Run `npm run doctor`, then check `sudo journalctl -u fluid-server -f`. |

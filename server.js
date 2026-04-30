@@ -171,6 +171,16 @@ function broadcastDeviceUpdate() {
   broadcastDisplay(payload);
 }
 
+function selectDeviceForDisplay(deviceId, reason) {
+  if (!devices.has(deviceId)) return false;
+  activeDeviceId = deviceId;
+  const dev = devices.get(deviceId);
+  logger.info(`${reason} selected device  id=${deviceId}  name="${dev.name}"`);
+  broadcastDisplay({ type: 'initiate-rtc', deviceId });
+  broadcastDeviceUpdate();
+  return true;
+}
+
 function getServerInfo() {
   const ifaces = os.networkInterfaces();
   const ips = [];
@@ -330,11 +340,7 @@ function handleMessage(ws, data) {
         safeSend(ws, { type: 'error', message: 'Device not found' });
         return;
       }
-      activeDeviceId = deviceId;
-      logger.info(`Admin selected device  id=${deviceId}  name="${devices.get(deviceId).name}"`);
-      // Tell display to initiate WebRTC offer to this client
-      broadcastDisplay({ type: 'initiate-rtc', deviceId });
-      broadcastDeviceUpdate();
+      selectDeviceForDisplay(deviceId, 'Admin');
       break;
     }
 
@@ -404,6 +410,11 @@ function handleMessage(ws, data) {
       if (dev) dev.status = 'streaming';
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: true });
       logger.info(`Stream started  deviceId=${ws.deviceId}`);
+      if (!activeDeviceId && displayWs?.readyState === WebSocket.OPEN) {
+        selectDeviceForDisplay(ws.deviceId, 'Auto');
+      } else {
+        broadcastDeviceUpdate();
+      }
       break;
     }
 
@@ -414,6 +425,11 @@ function handleMessage(ws, data) {
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: false });
       broadcastDisplay({ type: 'stream-ended', deviceId: ws.deviceId });
       logger.info(`Stream stopped  deviceId=${ws.deviceId}`);
+      if (activeDeviceId === ws.deviceId) {
+        activeDeviceId = null;
+        broadcastDisplay({ type: 'deselect' });
+        broadcastDeviceUpdate();
+      }
       break;
     }
 
