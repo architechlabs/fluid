@@ -120,7 +120,6 @@ const devices = new Map();
 const adminSockets = new Set();
 // The single Pi display WebSocket
 let displayWs     = null;
-let activeDeviceId = null;
 
 // Stats
 const stats = {
@@ -155,27 +154,34 @@ function getDeviceList() {
       status:      d.status,
       connectedAt: d.connectedAt,
       ip:          d.ip,
-      isActive:    id === activeDeviceId,
+      isActive:    d.status === 'streaming',
     });
   });
   return list;
 }
 
+function getStreamingDeviceIds() {
+  return [...devices.entries()]
+    .filter(([, d]) => d.status === 'streaming')
+    .map(([id]) => id);
+}
+
 function broadcastDeviceUpdate() {
+  const activeDeviceIds = getStreamingDeviceIds();
   const payload = {
     type:           'device-list',
     devices:        getDeviceList(),
-    activeDeviceId,
+    activeDeviceId: activeDeviceIds[0] || null,
+    activeDeviceIds,
   };
   broadcastAdmins(payload);
   broadcastDisplay(payload);
 }
 
-function selectDeviceForDisplay(deviceId, reason) {
+function initiateDeviceDisplay(deviceId, reason) {
   if (!devices.has(deviceId)) return false;
-  activeDeviceId = deviceId;
   const dev = devices.get(deviceId);
-  logger.info(`${reason} selected device  id=${deviceId}  name="${dev.name}"`);
+  logger.info(`${reason} display start  id=${deviceId}  name="${dev.name}"`);
   broadcastDisplay({ type: 'initiate-rtc', deviceId });
   broadcastDeviceUpdate();
   return true;
@@ -196,6 +202,7 @@ function getServerInfo() {
     uptime:    process.uptime(),
     stats,
     port:      PORT,
+    publicPort: SERVER_PORT,
   };
 }
 
@@ -271,8 +278,12 @@ function handleMessage(ws, data) {
       safeSend(ws, {
         type:           'display-welcome',
         devices:        getDeviceList(),
-        activeDeviceId,
+        activeDeviceId: getStreamingDeviceIds()[0] || null,
+        activeDeviceIds: getStreamingDeviceIds(),
         serverInfo:     getServerInfo(),
+      });
+      getStreamingDeviceIds().forEach(deviceId => {
+        safeSend(ws, { type: 'initiate-rtc', deviceId });
       });
       broadcastAdmins({ type: 'display-status', connected: true });
       break;
@@ -317,7 +328,8 @@ function handleMessage(ws, data) {
       safeSend(ws, {
         type:          'admin-welcome',
         devices:       getDeviceList(),
-        activeDeviceId,
+        activeDeviceId: getStreamingDeviceIds()[0] || null,
+        activeDeviceIds: getStreamingDeviceIds(),
         serverInfo:    getServerInfo(),
         displayOnline: displayWs?.readyState === WebSocket.OPEN,
       });
@@ -329,18 +341,24 @@ function handleMessage(ws, data) {
       if (ws.role !== 'admin') { safeSend(ws, { type: 'error', message: 'Unauthorized' }); return; }
       const { deviceId } = data;
       if (deviceId === null || deviceId === undefined) {
-        // Deselect
-        activeDeviceId = null;
-        broadcastDisplay({ type: 'deselect' });
         broadcastDeviceUpdate();
-        logger.info('Admin deselected device');
+        getStreamingDeviceIds().forEach(id => initiateDeviceDisplay(id, 'Admin sync'));
+        logger.info('Admin synced display wall');
         return;
       }
       if (!devices.has(deviceId)) {
         safeSend(ws, { type: 'error', message: 'Device not found' });
         return;
       }
-      selectDeviceForDisplay(deviceId, 'Admin');
+      initiateDeviceDisplay(deviceId, 'Admin');
+      break;
+    }
+
+    case 'sync-display': {
+      if (ws.role !== 'admin') { safeSend(ws, { type: 'error', message: 'Unauthorized' }); return; }
+      broadcastDeviceUpdate();
+      getStreamingDeviceIds().forEach(id => initiateDeviceDisplay(id, 'Admin sync'));
+      logger.info('Admin synced display wall');
       break;
     }
 
@@ -397,7 +415,7 @@ function handleMessage(ws, data) {
       if (ws.role === 'client') {
         safeSend(displayWs, { type: 'rtc-ice', candidate: data.candidate, fromDeviceId: ws.deviceId });
       } else if (ws.role === 'display') {
-        const target = devices.get(data.targetDeviceId || activeDeviceId);
+        const target = devices.get(data.targetDeviceId);
         if (target) safeSend(target.ws, { type: 'rtc-ice', candidate: data.candidate });
       }
       break;
@@ -410,8 +428,8 @@ function handleMessage(ws, data) {
       if (dev) dev.status = 'streaming';
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: true });
       logger.info(`Stream started  deviceId=${ws.deviceId}`);
-      if (!activeDeviceId && displayWs?.readyState === WebSocket.OPEN) {
-        selectDeviceForDisplay(ws.deviceId, 'Auto');
+      if (displayWs?.readyState === WebSocket.OPEN) {
+        initiateDeviceDisplay(ws.deviceId, 'Auto');
       } else {
         broadcastDeviceUpdate();
       }
@@ -425,11 +443,7 @@ function handleMessage(ws, data) {
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: false });
       broadcastDisplay({ type: 'stream-ended', deviceId: ws.deviceId });
       logger.info(`Stream stopped  deviceId=${ws.deviceId}`);
-      if (activeDeviceId === ws.deviceId) {
-        activeDeviceId = null;
-        broadcastDisplay({ type: 'deselect' });
-        broadcastDeviceUpdate();
-      }
+      broadcastDeviceUpdate();
       break;
     }
 
@@ -450,10 +464,7 @@ function handleDisconnect(ws) {
     case 'client':
       if (ws.deviceId) {
         devices.delete(ws.deviceId);
-        if (activeDeviceId === ws.deviceId) {
-          activeDeviceId = null;
-          broadcastDisplay({ type: 'deselect' });
-        }
+        broadcastDisplay({ type: 'stream-ended', deviceId: ws.deviceId });
         broadcastDeviceUpdate();
         logger.info(`Client disconnected  id=${ws.deviceId}`);
       }
@@ -473,7 +484,8 @@ app.get('/api/health', (req, res) => {
     status:        'ok',
     uptime:        process.uptime(),
     devices:       devices.size,
-    activeDevice:  activeDeviceId,
+    activeDevice:  getStreamingDeviceIds()[0] || null,
+    activeDevices: getStreamingDeviceIds(),
     displayOnline: displayWs?.readyState === WebSocket.OPEN,
     serverInfo:    getServerInfo(),
   });
@@ -484,7 +496,7 @@ app.get('/api/devices', (req, res) => {
   if (req.query.pin !== ADMIN_PIN) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  res.json({ devices: getDeviceList(), activeDeviceId });
+  res.json({ devices: getDeviceList(), activeDeviceId: getStreamingDeviceIds()[0] || null, activeDeviceIds: getStreamingDeviceIds() });
 });
 
 // Catch-all → serve index

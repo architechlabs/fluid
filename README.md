@@ -9,7 +9,8 @@ Users open one page from any laptop on the same network, share their screen, and
 - Browser screen sharing with no client app to install
 - Admin dashboard with PIN access
 - Full-screen HDMI display mode for the Pi
-- Auto-display of the first active shared screen on HDMI
+- Auto-display of every active shared screen on HDMI
+- Responsive screen wall layout for multiple devices
 - WebRTC peer connection over LAN
 - Systemd services that start on boot
 - One installer that configures Node.js, Chromium, Xorg, logs, services, and HTTPS
@@ -104,7 +105,7 @@ http://<pi-ip>:3000/display.html
 
 ## HDMI Display
 
-After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When a laptop starts sharing, Fluid automatically shows the first active shared screen on HDMI. The admin panel is still available when you want to switch devices manually.
+After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When laptops start sharing, Fluid automatically shows every live screen on HDMI in a responsive wall. One live device fills the screen, two devices split the screen, four devices become a 2x2 wall, and larger groups continue fitting into a grid.
 
 If the TV still shows the Raspberry Pi terminal:
 
@@ -229,7 +230,7 @@ npm run doctor
 | nginx fails to start during install | Re-run the latest installer. It stops old Fluid services before nginx binds the public HTTPS port and prints any remaining port owner. |
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
-| Display stays on standby | Open admin panel and select a connected device. |
+| Display stays on standby | Make sure at least one device is actively sharing, then click `Sync Wall` in the admin panel. |
 | TV shows Raspberry Pi terminal | Restart the display service with `sudo systemctl restart fluid-display`, then check `sudo journalctl -u fluid-display -n 80 --no-pager`. |
 | Admin PIN does not work | Check `/etc/fluid/fluid.env`, then restart `fluid-server`. |
 | Kiosk does not launch | Run `sudo journalctl -u fluid-display -f` and confirm Chromium is installed. |

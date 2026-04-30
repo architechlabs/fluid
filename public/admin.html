@@ -270,7 +270,7 @@
       <div class="topbar-right">
         <span id="serverPill" class="pill red">● Server</span>
         <button class="btn btn-ghost" onclick="fetchStats()">↻ Refresh</button>
-        <button class="btn btn-red" id="deselBtn" disabled onclick="deselect()">Stop Display</button>
+        <button class="btn btn-ghost" id="syncBtn" onclick="syncDisplay()">Sync Wall</button>
         <button class="btn btn-ghost" onclick="reloadDisplay()">Reload Display</button>
       </div>
     </div>
@@ -278,7 +278,7 @@
     <!-- Stat cards -->
     <div class="stat-grid" id="statGrid">
       <div class="stat-card green"><div class="val" id="scDevices">0</div><div class="key">Connected Devices</div></div>
-      <div class="stat-card accent"><div class="val" id="scActive">—</div><div class="key">Active on Display</div></div>
+      <div class="stat-card accent"><div class="val" id="scActive">0</div><div class="key">Live Screens</div></div>
       <div class="stat-card orange"><div class="val" id="scUptime">—</div><div class="key">Server Uptime</div></div>
       <div class="stat-card"><div class="val" id="scPort">3000</div><div class="key">Server Port</div></div>
     </div>
@@ -333,7 +333,7 @@
 'use strict';
 
 let ws = null, adminPin = null;
-let devices = [], activeDeviceId = null;
+let devices = [], activeDeviceIds = [];
 let renameTargetId = null;
 let reconnectDelay = 2000;
 
@@ -411,7 +411,7 @@ function handleMsg(msg) {
     case 'admin-welcome':
       $('authOverlay').classList.add('hidden');
       devices = msg.devices || [];
-      activeDeviceId = msg.activeDeviceId;
+      activeDeviceIds = msg.activeDeviceIds || (msg.activeDeviceId ? [msg.activeDeviceId] : []);
       renderDevices();
       updateServerInfo(msg.serverInfo);
       updateDisplayStatus(msg.displayOnline);
@@ -420,7 +420,7 @@ function handleMsg(msg) {
 
     case 'device-list':
       devices = msg.devices || [];
-      activeDeviceId = msg.activeDeviceId;
+      activeDeviceIds = msg.activeDeviceIds || (msg.activeDeviceId ? [msg.activeDeviceId] : []);
       renderDevices();
       updateStats();
       break;
@@ -453,7 +453,7 @@ function renderDevices() {
   }
 
   tbody.innerHTML = devices.map(d => {
-    const isActive = d.id === activeDeviceId;
+    const isActive = activeDeviceIds.includes(d.id) || d.status === 'streaming';
     const time = new Date(d.connectedAt).toLocaleTimeString();
     const statusPill = d.status === 'streaming'
       ? `<span class="pill accent"><span class="dot-live"></span> LIVE</span>`
@@ -472,7 +472,7 @@ function renderDevices() {
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-accent ${isActive ? 'active' : ''}"
               onclick="selectDevice('${d.id}')">
-              ${isActive ? '▶ Showing' : '▶ Show'}
+              ${isActive ? '↻ Refresh Tile' : '＋ Add Tile'}
             </button>
             <button class="btn btn-ghost" onclick="openRename('${d.id}','${escHtml(d.name)}')">✏️</button>
             <button class="btn btn-red" onclick="kickDevice('${d.id}')">✕ Kick</button>
@@ -481,16 +481,14 @@ function renderDevices() {
       </tr>`;
   }).join('');
 
-  // Update active device name in stats
-  const active = devices.find(d => d.id === activeDeviceId);
-  $('scActive').textContent = active ? active.name : '—';
-  $('deselBtn').disabled = !activeDeviceId;
+  updateStats();
 }
 
 function updateStats() {
   $('scDevices').textContent = devices.length;
-  const active = devices.find(d => d.id === activeDeviceId);
-  $('scActive').textContent = active ? active.name : '—';
+  const liveCount = devices.filter(d => d.status === 'streaming').length;
+  $('scActive').textContent = liveCount;
+  $('syncBtn').disabled = false;
 }
 
 function updateServerInfo(info) {
@@ -532,16 +530,15 @@ function updateDisplayStatus(online) {
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 function selectDevice(deviceId) {
-  if (activeDeviceId === deviceId) return;
   send({ type: 'select-device', deviceId });
-  addLog(`Switching display to device ${deviceId.slice(0,8)}…`);
-  toast('Switching display…');
+  addLog(`Refreshing display tile for device ${deviceId.slice(0,8)}…`);
+  toast('Refreshing tile…');
 }
 
-function deselect() {
-  send({ type: 'select-device', deviceId: null });
-  addLog('Display cleared');
-  toast('Display cleared');
+function syncDisplay() {
+  send({ type: 'sync-display' });
+  addLog('Display wall sync requested');
+  toast('Syncing wall…');
 }
 
 function kickDevice(deviceId) {
