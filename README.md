@@ -105,7 +105,26 @@ http://<pi-ip>:3000/display.html
 
 ## HDMI Display
 
-After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When laptops start sharing, Fluid automatically shows every live screen on HDMI in a responsive wall. One live device fills the screen, two devices split the screen, four devices become a 2x2 wall, and larger groups continue fitting into a grid.
+After installation and reboot, the TV connected to the Raspberry Pi HDMI port should show the Fluid standby screen instead of the terminal. When laptops start sharing, Fluid automatically shows every live screen on HDMI in a responsive wall. One live device fills the screen, two devices split side-by-side, four devices become a 2x2 wall, sixteen devices become a 4x4 wall, and larger groups continue fitting into a grid.
+
+The installer pins the kiosk viewport to `1920x1080` by default and writes matching Raspberry Pi framebuffer settings. For a different TV mode, reinstall with:
+
+```bash
+sudo bash install.sh --kiosk-size 3840x2160
+```
+
+Or edit `/etc/fluid/fluid.env`:
+
+```text
+KIOSK_WIDTH=1920
+KIOSK_HEIGHT=1080
+```
+
+Then restart the display:
+
+```bash
+sudo systemctl restart fluid-display
+```
 
 If the TV still shows the Raspberry Pi terminal:
 
@@ -231,6 +250,8 @@ npm run doctor
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Display stays on standby | Make sure at least one device is actively sharing, then click `Sync Wall` in the admin panel. |
+| TV image is stuck on the left half | Re-run `sudo bash install.sh`, reboot once, then check `KIOSK_WIDTH` and `KIOSK_HEIGHT` in `/etc/fluid/fluid.env` match the TV mode. |
+| Two laptops do not show together | Restart the display with `sudo systemctl restart fluid-display`, then click `Sync Wall`; every device with status `streaming` should appear as its own tile. |
 | TV shows Raspberry Pi terminal | Restart the display service with `sudo systemctl restart fluid-display`, then check `sudo journalctl -u fluid-display -n 80 --no-pager`. |
 | Admin PIN does not work | Check `/etc/fluid/fluid.env`, then restart `fluid-server`. |
 | Kiosk does not launch | Run `sudo journalctl -u fluid-display -f` and confirm Chromium is installed. |

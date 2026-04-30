@@ -23,6 +23,8 @@ ADMIN_PIN=""
 MAX_DEVICES="20"
 WITH_HTTPS="true"
 HTTPS_NAME=""
+KIOSK_WIDTH="1920"
+KIOSK_HEIGHT="1080"
 NO_REBOOT="false"
 NO_START="false"
 ASSUME_YES="false"
@@ -50,6 +52,7 @@ Options:
   --with-https          Install nginx reverse proxy with a self-signed cert. Default.
   --no-https            Skip HTTPS reverse proxy setup.
   --https-name NAME     Certificate name/CN. Default: fluid.local.
+  --kiosk-size WxH      HDMI kiosk viewport. Default: 1920x1080.
   --no-reboot           Do not prompt for reboot.
   --no-start            Install only; do not start services.
   -y, --yes             Use safe defaults for prompts.
@@ -73,6 +76,11 @@ while [[ $# -gt 0 ]]; do
     --with-https) WITH_HTTPS="true"; shift ;;
     --no-https) WITH_HTTPS="false"; shift ;;
     --https-name) HTTPS_NAME="${2:-}"; shift 2 ;;
+    --kiosk-size)
+      KIOSK_WIDTH="${2%x*}"
+      KIOSK_HEIGHT="${2#*x}"
+      shift 2
+      ;;
     --no-reboot) NO_REBOOT="true"; shift ;;
     --no-start) NO_START="true"; shift ;;
     -y|--yes) ASSUME_YES="true"; shift ;;
@@ -118,6 +126,10 @@ validate_config() {
   fi
   is_number "$MAX_DEVICES" || err "Max devices must be a number."
   (( MAX_DEVICES >= 1 && MAX_DEVICES <= 250 )) || err "Max devices must be between 1 and 250."
+  is_number "$KIOSK_WIDTH" || err "Kiosk width must be a number."
+  is_number "$KIOSK_HEIGHT" || err "Kiosk height must be a number."
+  (( KIOSK_WIDTH >= 640 && KIOSK_WIDTH <= 7680 )) || err "Kiosk width must be between 640 and 7680."
+  (( KIOSK_HEIGHT >= 480 && KIOSK_HEIGHT <= 4320 )) || err "Kiosk height must be between 480 and 4320."
   [[ -n "$ADMIN_PIN" ]] || err "Admin PIN cannot be empty."
 
   if [[ "$ADMIN_PIN" == "0000" ]]; then
@@ -276,6 +288,8 @@ MAX_DEVICES=${MAX_DEVICES}
 LOG_FILE=${LOG_DIR}/server.log
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
+KIOSK_WIDTH=${KIOSK_WIDTH}
+KIOSK_HEIGHT=${KIOSK_HEIGHT}
 # Override to force the kiosk to open a different address:
 SERVER_URL=${kiosk_url}
 EOF
@@ -315,6 +329,17 @@ install_services() {
   log "Services enabled"
 }
 
+set_boot_config() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s/^${key}=.*/${key}=${value}/" "$file"
+  else
+    printf "%s=%s\n" "$key" "$value" >> "$file"
+  fi
+}
+
 configure_boot() {
   step "Configuring Raspberry Pi display settings"
   raspi-config nonint do_boot_behaviour B2 >/dev/null 2>&1 || true
@@ -322,13 +347,11 @@ configure_boot() {
   local config_file="/boot/firmware/config.txt"
   [[ -f "$config_file" ]] || config_file="/boot/config.txt"
   if [[ -f "$config_file" ]]; then
-    if grep -q "^gpu_mem=" "$config_file"; then
-      sed -i 's/^gpu_mem=.*/gpu_mem=128/' "$config_file"
-    else
-      printf "\ngpu_mem=128\n" >> "$config_file"
-    fi
-
-    grep -q "^disable_overscan=1" "$config_file" || printf "disable_overscan=1\n" >> "$config_file"
+    set_boot_config "$config_file" "gpu_mem" "128"
+    set_boot_config "$config_file" "disable_overscan" "1"
+    set_boot_config "$config_file" "hdmi_force_hotplug" "1"
+    set_boot_config "$config_file" "framebuffer_width" "$KIOSK_WIDTH"
+    set_boot_config "$config_file" "framebuffer_height" "$KIOSK_HEIGHT"
     log "Updated ${config_file}"
   else
     warn "Could not find Raspberry Pi boot config; skipped GPU/overscan tuning."

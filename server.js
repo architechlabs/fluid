@@ -178,12 +178,25 @@ function broadcastDeviceUpdate() {
   broadcastDisplay(payload);
 }
 
+function serializeDevice(deviceId) {
+  const dev = devices.get(deviceId);
+  if (!dev) return null;
+  return {
+    id:          deviceId,
+    name:        dev.name,
+    platform:    dev.platform || 'Unknown',
+    status:      dev.status,
+    connectedAt: dev.connectedAt,
+    ip:          dev.ip,
+    isActive:    dev.status === 'streaming',
+  };
+}
+
 function initiateDeviceDisplay(deviceId, reason) {
   if (!devices.has(deviceId)) return false;
   const dev = devices.get(deviceId);
   logger.info(`${reason} display start  id=${deviceId}  name="${dev.name}"`);
-  broadcastDisplay({ type: 'initiate-rtc', deviceId });
-  broadcastDeviceUpdate();
+  broadcastDisplay({ type: 'initiate-rtc', deviceId, device: serializeDevice(deviceId) });
   return true;
 }
 
@@ -283,7 +296,7 @@ function handleMessage(ws, data) {
         serverInfo:     getServerInfo(),
       });
       getStreamingDeviceIds().forEach(deviceId => {
-        safeSend(ws, { type: 'initiate-rtc', deviceId });
+        safeSend(ws, { type: 'initiate-rtc', deviceId, device: serializeDevice(deviceId) });
       });
       broadcastAdmins({ type: 'display-status', connected: true });
       break;
@@ -428,10 +441,9 @@ function handleMessage(ws, data) {
       if (dev) dev.status = 'streaming';
       broadcastAdmins({ type: 'device-streaming', deviceId: ws.deviceId, streaming: true });
       logger.info(`Stream started  deviceId=${ws.deviceId}`);
+      broadcastDeviceUpdate();
       if (displayWs?.readyState === WebSocket.OPEN) {
         initiateDeviceDisplay(ws.deviceId, 'Auto');
-      } else {
-        broadcastDeviceUpdate();
       }
       break;
     }
