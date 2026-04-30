@@ -18,6 +18,7 @@ CONFIG_DIR="/etc/fluid"
 LOG_DIR="/var/log/fluid"
 NODE_VERSION="20"
 SERVER_PORT="3000"
+APP_PORT=""
 ADMIN_PIN=""
 MAX_DEVICES="20"
 WITH_HTTPS="true"
@@ -42,6 +43,7 @@ Usage:
 Options:
   --admin-pin PIN       Admin dashboard PIN. Prompts if omitted.
   --port PORT           Server port. Default: 3000.
+  --app-port PORT       Internal Node.js port when HTTPS is enabled. Auto-picked if omitted.
   --max-devices N       Max client devices. Default: 20.
   --install-dir PATH    Install directory. Default: /opt/fluid.
   --user NAME           Service user. Default: fluid.
@@ -64,6 +66,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --admin-pin) ADMIN_PIN="${2:-}"; shift 2 ;;
     --port) SERVER_PORT="${2:-}"; shift 2 ;;
+    --app-port) APP_PORT="${2:-}"; shift 2 ;;
     --max-devices) MAX_DEVICES="${2:-}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
@@ -108,12 +111,34 @@ prompt_if_needed() {
 validate_config() {
   is_number "$SERVER_PORT" || err "Port must be a number."
   (( SERVER_PORT >= 1 && SERVER_PORT <= 65535 )) || err "Port must be between 1 and 65535."
+  if [[ -n "$APP_PORT" ]]; then
+    is_number "$APP_PORT" || err "App port must be a number."
+    (( APP_PORT >= 1 && APP_PORT <= 65535 )) || err "App port must be between 1 and 65535."
+    [[ "$APP_PORT" != "$SERVER_PORT" ]] || err "App port must be different from the public HTTPS port."
+  fi
   is_number "$MAX_DEVICES" || err "Max devices must be a number."
   (( MAX_DEVICES >= 1 && MAX_DEVICES <= 250 )) || err "Max devices must be between 1 and 250."
   [[ -n "$ADMIN_PIN" ]] || err "Admin PIN cannot be empty."
 
   if [[ "$ADMIN_PIN" == "0000" ]]; then
     warn "Default admin PIN is enabled. Change it after install in ${CONFIG_DIR}/fluid.env."
+  fi
+}
+
+choose_app_port() {
+  if [[ "$WITH_HTTPS" != "true" ]]; then
+    APP_PORT="$SERVER_PORT"
+    return
+  fi
+
+  if [[ -n "$APP_PORT" ]]; then
+    return
+  fi
+
+  if (( SERVER_PORT < 65535 )); then
+    APP_PORT=$((SERVER_PORT + 1))
+  else
+    APP_PORT=$((SERVER_PORT - 1))
   fi
 }
 
@@ -207,8 +232,15 @@ write_config() {
   chromium_bin="$(command -v chromium-browser || command -v chromium || true)"
   [[ -n "$chromium_bin" ]] || err "Chromium was not found after package installation."
 
+  local app_host="0.0.0.0"
+  local kiosk_url="http://127.0.0.1:${APP_PORT}/display.html"
+  if [[ "$WITH_HTTPS" == "true" ]]; then
+    app_host="127.0.0.1"
+  fi
+
   cat > "$CONFIG_DIR/fluid.env" <<EOF
-PORT=${SERVER_PORT}
+HOST=${app_host}
+PORT=${APP_PORT}
 SERVER_PORT=${SERVER_PORT}
 ADMIN_PIN=${ADMIN_PIN}
 MAX_DEVICES=${MAX_DEVICES}
@@ -216,7 +248,7 @@ LOG_FILE=${LOG_DIR}/server.log
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
 # Override to force the kiosk to open a different address:
-# SERVER_URL=http://localhost:${SERVER_PORT}/display.html
+SERVER_URL=${kiosk_url}
 EOF
 
   chmod 640 "$CONFIG_DIR/fluid.env"
@@ -281,6 +313,21 @@ configure_https() {
   HTTPS_NAME="${HTTPS_NAME:-fluid.local}"
   apt-get install -y -qq nginx openssl
 
+  local ssl_listen_lines
+  if [[ "$SERVER_PORT" == "443" ]]; then
+    ssl_listen_lines="    listen 443 ssl;"
+  else
+    ssl_listen_lines="    listen 443 ssl;
+    listen ${SERVER_PORT} ssl;"
+  fi
+
+  local redirect_target
+  if [[ "$SERVER_PORT" == "443" ]]; then
+    redirect_target='https://$host$request_uri'
+  else
+    redirect_target="https://\$host:${SERVER_PORT}\$request_uri"
+  fi
+
   openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -keyout /etc/ssl/fluid.key \
     -out /etc/ssl/fluid.crt \
@@ -288,14 +335,14 @@ configure_https() {
 
   cat > /etc/nginx/sites-available/fluid <<EOF
 server {
-    listen 443 ssl;
+${ssl_listen_lines}
     server_name _;
 
     ssl_certificate     /etc/ssl/fluid.crt;
     ssl_certificate_key /etc/ssl/fluid.key;
 
     location / {
-        proxy_pass http://127.0.0.1:${SERVER_PORT};
+        proxy_pass http://127.0.0.1:${APP_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -308,7 +355,7 @@ server {
 server {
     listen 80;
     server_name _;
-    return 301 https://\$host\$request_uri;
+    return 301 ${redirect_target};
 }
 EOF
 
@@ -343,15 +390,26 @@ print_summary() {
     while IFS= read -r ip; do
       [[ -n "$ip" ]] || continue
       if [[ "$WITH_HTTPS" == "true" ]]; then
-        printf "  https://%s/client.html\n" "$ip"
-        printf "  https://%s/admin.html\n" "$ip"
+        if [[ "$SERVER_PORT" == "443" ]]; then
+          printf "  https://%s/client.html\n" "$ip"
+          printf "  https://%s/admin.html\n" "$ip"
+        else
+          printf "  https://%s:%s/client.html\n" "$ip" "$SERVER_PORT"
+          printf "  https://%s:%s/admin.html\n" "$ip" "$SERVER_PORT"
+        fi
       else
         printf "  http://%s:%s/client.html\n" "$ip" "$SERVER_PORT"
         printf "  http://%s:%s/admin.html\n" "$ip" "$SERVER_PORT"
       fi
     done <<< "$ips"
   else
-    printf "Open: http://<pi-ip>:%s/client.html\n" "$SERVER_PORT"
+    if [[ "$WITH_HTTPS" == "true" && "$SERVER_PORT" != "443" ]]; then
+      printf "Open: https://<pi-ip>:%s/client.html\n" "$SERVER_PORT"
+    elif [[ "$WITH_HTTPS" == "true" ]]; then
+      printf "Open: https://<pi-ip>/client.html\n"
+    else
+      printf "Open: http://<pi-ip>:%s/client.html\n" "$SERVER_PORT"
+    fi
   fi
 
   printf "\nUseful commands:\n"
@@ -378,6 +436,7 @@ main() {
 
   prompt_if_needed
   validate_config
+  choose_app_port
   install_packages
   install_node
   create_user_and_dirs

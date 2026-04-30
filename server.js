@@ -17,6 +17,8 @@ const os         = require('os');
 loadEnvFile(path.join(__dirname, '.env'));
 
 const PORT        = readIntEnv('PORT', 3000, 1, 65535);
+const HOST        = process.env.HOST || '0.0.0.0';
+const SERVER_PORT = readIntEnv('SERVER_PORT', PORT, 1, 65535);
 const ADMIN_PIN   = String(process.env.ADMIN_PIN || '0000');
 const LOG_FILE    = process.env.LOG_FILE || path.join(__dirname, 'logs', 'server.log');
 const MAX_DEVICES = readIntEnv('MAX_DEVICES', 20, 1, 250);
@@ -98,7 +100,8 @@ app.use((req, res, next) => {
   const localHost = ['localhost', '127.0.0.1', '::1'].includes(host);
   if (!host || localHost || req.path.startsWith('/api/health')) return next();
 
-  return res.redirect(308, `https://${host}${req.originalUrl}`);
+  const port = SERVER_PORT === 443 ? '' : `:${SERVER_PORT}`;
+  return res.redirect(308, `https://${host}${port}${req.originalUrl}`);
 });
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -474,10 +477,10 @@ app.get('*', (req, res) => {
 });
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-server.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, HOST, () => {
   logger.info(`═══════════════════════════════════════`);
   logger.info(` Fluid Server  v1.0.0`);
-  logger.info(` Port     : ${PORT}`);
+  logger.info(` Listen   : ${HOST}:${PORT}`);
   logger.info(` Admin PIN: ${ADMIN_PIN === '0000' ? 'default PIN in use - change before real deployment' : 'configured'}`);
   logger.info(` Log file : ${LOG_FILE}`);
   logger.info(`═══════════════════════════════════════`);

@@ -229,7 +229,8 @@ function detectPlatform() {
 }
 
 function secureShareUrl() {
-  return `https://${location.hostname}/client.html`;
+  const port = location.port && !['80', '443'].includes(location.port) ? `:${location.port}` : '';
+  return `https://${location.hostname}${port}/client.html`;
 }
 
 function getShareBlockReason() {

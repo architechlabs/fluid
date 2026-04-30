@@ -58,7 +58,7 @@ For unattended installs:
 sudo bash install.sh --admin-pin 8432 --port 3000 --yes --no-reboot
 ```
 
-HTTPS is installed by default because browser screen sharing is blocked on plain HTTP from another device. Fluid also redirects direct HTTP page requests to the secure URL after installation, so users do not need to remember the right version.
+HTTPS is installed by default because browser screen sharing is blocked on plain HTTP from another device. The port you choose becomes the public HTTPS port. Fluid moves the Node.js app behind nginx on an internal local port automatically.
 
 ```bash
 sudo bash install.sh --admin-pin 8432
@@ -77,8 +77,15 @@ Most browsers require HTTPS for screen capture on non-localhost pages. The insta
 Open these from a device on the same network:
 
 ```text
-https://<pi-ip>/client.html
-https://<pi-ip>/admin.html
+https://<pi-ip>:3000/client.html
+https://<pi-ip>:3000/admin.html
+```
+
+If you installed with `--port 3123`, use:
+
+```text
+https://<pi-ip>:3123/client.html
+https://<pi-ip>:3123/admin.html
 ```
 
 If you installed with `--no-https` for local testing:
@@ -93,6 +100,10 @@ The display view normally launches automatically on the Pi HDMI output. You can 
 ```text
 http://<pi-ip>:3000/display.html
 ```
+
+## Native Cast Menu
+
+Fluid does not appear inside Chrome's Cast picker as a native device. That menu discovers Cast-enabled receiver devices, not normal LAN web apps. See [docs/CAST.md](docs/CAST.md) for the exact boundary and the real options.
 
 ## Configuration
 
@@ -159,7 +170,8 @@ npm run doctor
 
 ```text
 --admin-pin PIN       Admin dashboard PIN
---port PORT           Server port, default 3000
+--port PORT           Public HTTPS port, default 3000
+--app-port PORT       Internal Node.js port when HTTPS is enabled, auto-picked
 --max-devices N       Max client devices, default 20
 --install-dir PATH    Install directory, default /opt/fluid
 --user NAME           Service user, default Fluid
@@ -198,7 +210,8 @@ npm run doctor
 | Problem | Fix |
 | --- | --- |
 | Screen share button fails | Use HTTPS, Chrome/Edge/Firefox, and allow screen capture permission. |
-| Page says screen sharing is blocked | Open `https://<pi-ip>/client.html`, not `http://<pi-ip>:3000/client.html`. |
+| `ERR_SSL_PROTOCOL_ERROR` on `https://<pi-ip>:<port>` | Re-run the latest installer. The chosen port must be served by nginx HTTPS, with Node on an internal port. |
+| Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Display stays on standby | Open admin panel and select a connected device. |
 | Admin PIN does not work | Check `/etc/fluid/fluid.env`, then restart `fluid-server`. |
