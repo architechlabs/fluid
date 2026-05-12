@@ -96,6 +96,11 @@ doctor() {
   else
     echo "[warn] uxplay missing; AirPlay receiver will not start"
   fi
+  if have gst-inspect-1.0 && gst-inspect-1.0 videoparsersbad >/dev/null 2>&1; then
+    echo "[ok] GStreamer videoparsersbad plugin found for AirPlay"
+  else
+    echo "[warn] GStreamer videoparsersbad plugin missing; install gstreamer1.0-plugins-bad for AirPlay"
+  fi
   if have miracle-sinkctl && have miracle-wifid; then
     echo "[ok] miraclecast sink tooling detected"
   else
@@ -128,6 +133,12 @@ run_airplay() {
   if ! have uxplay; then
     echo "uxplay is not installed; AirPlay receiver cannot start."
     echo "Re-run install.sh --with-native-cast, or install uxplay from your Raspberry Pi OS repositories."
+    exit 0
+  fi
+  if ! have gst-inspect-1.0 || ! gst-inspect-1.0 videoparsersbad >/dev/null 2>&1; then
+    echo "AirPlay receiver cannot start because GStreamer videoparsersbad is missing."
+    echo "Run: sudo apt-get update && sudo apt-get install -y gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-base gstreamer1.0-tools"
+    echo "Then run: sudo systemctl restart fluid-native-cast"
     exit 0
   fi
 

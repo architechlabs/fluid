@@ -262,6 +262,28 @@ install_native_cast_packages() {
   step "Installing native cast gateway packages"
   apt-get install -y -qq avahi-daemon iw
 
+  local airplay_runtime_packages=(
+    gstreamer1.0-libav
+    gstreamer1.0-plugins-bad
+    gstreamer1.0-plugins-base
+    gstreamer1.0-plugins-good
+    gstreamer1.0-plugins-ugly
+    gstreamer1.0-tools
+    gstreamer1.0-x
+  )
+  local available_airplay_packages=()
+  local pkg
+  for pkg in "${airplay_runtime_packages[@]}"; do
+    if apt-cache show "$pkg" >/dev/null 2>&1; then
+      available_airplay_packages+=("$pkg")
+    else
+      warn "${pkg} is not available in these apt repositories; skipping."
+    fi
+  done
+  if (( ${#available_airplay_packages[@]} > 0 )); then
+    apt-get install -y -qq "${available_airplay_packages[@]}" || warn "Some AirPlay GStreamer runtime packages could not be installed automatically."
+  fi
+
   if apt-cache show uxplay >/dev/null 2>&1; then
     apt-get install -y -qq uxplay
     log "AirPlay receiver package uxplay installed"

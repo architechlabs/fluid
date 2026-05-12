@@ -280,7 +280,9 @@ npm run doctor
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
 | Native Cast says AirPlay missing | Re-run `sudo bash install.sh --with-native-cast`; if `uxplay` is not in your Raspberry Pi OS repository, install it from a trusted package source for your OS release. |
+| AirPlay log says `videoparsersbad` missing | Pull the latest code and re-run `sudo bash install.sh --with-native-cast --cast-name Fluid`; the installer now installs the GStreamer runtime packages that `uxplay` needs. |
 | Miracast says needs-link | Re-run `sudo bash install.sh --with-native-cast --cast-name Fluid`. If auto-detection still cannot see the adapter link, run `sudo miracle-sinkctl`, copy the `[ADD] Link: N` number into `MIRACAST_LINK=N` in `/etc/fluid/fluid.env`, then restart `fluid-miracast`. |
+| Miracast log says tools are not installed | Your Raspberry Pi OS apt repositories did not provide `miraclecast`, so Windows Wireless Display cannot appear yet. Use the browser client page, or install a compatible MiracleCast/Wi-Fi Direct sink stack for that OS release. |
 | Miracast not discoverable | Miracast requires Wi-Fi Direct sink support. Check Raspberry Pi wireless hardware/driver support and `sudo journalctl -u fluid-miracast -n 80 --no-pager`. |
 | Display stays on standby | Make sure at least one device is actively sharing, then click `Sync Wall` in the admin panel. |
 | TV image is stuck on the left half | Re-run `sudo bash install.sh`, reboot once, then check `KIOSK_WIDTH` and `KIOSK_HEIGHT` in `/etc/fluid/fluid.env` match the TV mode. |
