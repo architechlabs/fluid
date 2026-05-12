@@ -31,6 +31,69 @@ have() {
   command -v "$1" >/dev/null 2>&1
 }
 
+find_visible_window_for_pid() {
+  local target_pid="$1"
+  local wid pid
+  [[ -n "$target_pid" ]] || return 1
+  have xdotool || return 1
+  for wid in $(xdotool search --onlyvisible --name '.*' 2>/dev/null || true); do
+    pid="$(xdotool getwindowpid "$wid" 2>/dev/null || true)"
+    if [[ "$pid" == "$target_pid" ]]; then
+      printf "%s\n" "$wid"
+      return 0
+    fi
+  done
+  return 1
+}
+
+find_fluid_display_window() {
+  local chromium_pid
+  chromium_pid="$(pgrep -u "${USER:-fluid}" -f 'chromium.*display\.html' | head -n1 || true)"
+  [[ -n "$chromium_pid" ]] || return 1
+  find_visible_window_for_pid "$chromium_pid"
+}
+
+monitor_airplay_window() {
+  local uxplay_pid="$1"
+  local fluid_window=""
+  local cast_window=""
+  local cast_visible="false"
+
+  have xdotool || return 0
+
+  while kill -0 "$uxplay_pid" 2>/dev/null; do
+    cast_window="$(find_visible_window_for_pid "$uxplay_pid" || true)"
+    if [[ -n "$cast_window" ]]; then
+      fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
+      if [[ "$cast_visible" != "true" ]]; then
+        echo "AirPlay window detected on X11; moving Fluid display to the background."
+        [[ -n "$fluid_window" ]] && xdotool windowminimize "$fluid_window" 2>/dev/null || true
+        cast_visible="true"
+      fi
+      xdotool windowmap "$cast_window" 2>/dev/null || true
+      xdotool windowraise "$cast_window" 2>/dev/null || true
+      xdotool windowactivate "$cast_window" 2>/dev/null || true
+    elif [[ "$cast_visible" == "true" ]]; then
+      fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
+      if [[ -n "$fluid_window" ]]; then
+        echo "AirPlay window closed; restoring Fluid display."
+        xdotool windowmap "$fluid_window" 2>/dev/null || true
+        xdotool windowraise "$fluid_window" 2>/dev/null || true
+        xdotool windowactivate "$fluid_window" 2>/dev/null || true
+      fi
+      cast_visible="false"
+    fi
+    sleep 1
+  done
+
+  fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
+  if [[ -n "$fluid_window" ]]; then
+    xdotool windowmap "$fluid_window" 2>/dev/null || true
+    xdotool windowraise "$fluid_window" 2>/dev/null || true
+    xdotool windowactivate "$fluid_window" 2>/dev/null || true
+  fi
+}
+
 json_bool() {
   [[ "${1:-false}" == "true" ]] && printf "true" || printf "false"
 }
@@ -167,7 +230,13 @@ run_airplay() {
     extra=($AIRPLAY_EXTRA_ARGS)
     args+=("${extra[@]}")
   fi
-  exec uxplay "${args[@]}"
+
+  uxplay "${args[@]}" &
+  uxplay_pid="$!"
+  monitor_airplay_window "$uxplay_pid" &
+  monitor_pid="$!"
+  trap 'kill "$monitor_pid" 2>/dev/null || true; kill "$uxplay_pid" 2>/dev/null || true' EXIT
+  wait "$uxplay_pid"
 }
 
 run_miracast() {
