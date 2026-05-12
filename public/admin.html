@@ -115,6 +115,22 @@
   .device-name { font-weight: 600; }
   .device-sub  { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
+  .cast-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    padding: 16px 20px;
+  }
+  .cast-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .cast-card h3 { font-size: 13px; margin-bottom: 8px; }
+  .cast-card p { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 8px; }
+  .cast-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+
   /* ── Buttons ── */
   .btn {
     padding: 7px 14px; border: none; border-radius: 7px;
@@ -246,6 +262,7 @@
         <div class="nav-label">Management</div>
         <a class="nav-item active" href="#devices"><span class="icon">💻</span> Devices</a>
         <a class="nav-item" href="#display"><span class="icon">🖥️</span> Display</a>
+        <a class="nav-item" href="#native-cast"><span class="icon">📡</span> Native Cast</a>
         <a class="nav-item" href="#server"><span class="icon">⚙️</span> Server Info</a>
         <a class="nav-item" href="#logs"><span class="icon">📋</span> Event Log</a>
       </div>
@@ -307,6 +324,18 @@
       </div>
     </div>
 
+    <!-- Native cast gateway -->
+    <div class="section" id="native-cast">
+      <div class="section-head">
+        <h2>Native Cast Gateway</h2>
+        <div id="castGatewayPill" class="pill red">Disabled</div>
+      </div>
+      <div style="padding:14px 20px;color:var(--muted);font-size:12px;line-height:1.55">
+        Browser sharing stays as the stable multi-screen wall. Native AirPlay, Miracast, and Google Cast are OS-level receiver paths and are reported here so installers and admins can enable them safely without breaking the wall.
+      </div>
+      <div class="cast-grid" id="castGrid"></div>
+    </div>
+
     <!-- Server info -->
     <div class="section" id="server">
       <div class="section-head"><h2>Server Info</h2></div>
@@ -333,6 +362,7 @@
 
 let ws = null, adminPin = null;
 let devices = [], activeDeviceIds = [];
+let castStatus = null;
 let renameTargetId = null;
 let reconnectDelay = 2000;
 
@@ -414,6 +444,7 @@ function handleMsg(msg) {
       renderDevices();
       updateServerInfo(msg.serverInfo);
       updateDisplayStatus(msg.displayOnline, msg.displayCount);
+      fetchCastStatus();
       addLog(`Admin authenticated — ${devices.length} device(s) online`);
       break;
 
@@ -527,6 +558,44 @@ function updateDisplayStatus(online, count) {
   el.textContent = online ? (count > 1 ? `${count} Online` : 'Online') : 'Offline';
 }
 
+function statusClass(status) {
+  if (['ready', 'available', 'detected', 'active'].includes(status)) return 'green';
+  if (['disabled', 'external'].includes(status)) return 'yellow';
+  return 'red';
+}
+
+function renderCastStatus() {
+  const pill = $('castGatewayPill');
+  const grid = $('castGrid');
+  if (!castStatus) {
+    pill.className = 'pill red';
+    pill.textContent = 'Unknown';
+    grid.innerHTML = '<div style="color:var(--muted);font-size:12px">Cast status has not loaded yet.</div>';
+    return;
+  }
+
+  pill.className = 'pill ' + (castStatus.enabled ? 'green' : 'yellow');
+  pill.textContent = castStatus.enabled ? `${castStatus.name} Enabled` : 'Disabled';
+  grid.innerHTML = (castStatus.protocols || []).map(p => `
+    <div class="cast-card">
+      <h3>${escHtml(p.label)}</h3>
+      <div class="cast-meta">
+        <span class="pill ${statusClass(p.status)}">${escHtml(p.status)}</span>
+        <span class="pill ${p.discoverable ? 'green' : 'yellow'}">${p.discoverable ? 'Discoverable' : 'Not Discoverable'}</span>
+        <span class="pill ${p.wall ? 'green' : 'yellow'}">${p.wall ? 'Wall Ready' : 'External Receiver'}</span>
+      </div>
+      <p>${escHtml(p.note || '')}</p>
+      ${['airplay', 'miracast'].includes(p.id) ? `
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+          <button class="btn btn-ghost" onclick="controlCast('${p.id}','start')">Start</button>
+          <button class="btn btn-ghost" onclick="controlCast('${p.id}','restart')">Restart</button>
+          <button class="btn btn-red" onclick="controlCast('${p.id}','stop')">Stop</button>
+        </div>
+      ` : ''}
+    </div>
+  `).join('');
+}
+
 // ── Actions ───────────────────────────────────────────────────────────────────
 function selectDevice(deviceId) {
   send({ type: 'select-device', deviceId });
@@ -587,6 +656,43 @@ function fetchStats() {
       updateDisplayStatus(d.displayOnline, d.displayCount);
     })
     .catch(() => {});
+  fetchCastStatus();
+}
+
+function fetchCastStatus() {
+  if (!adminPin) return;
+  fetch(`/api/cast/status?pin=${encodeURIComponent(adminPin)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (!d) return;
+      castStatus = d;
+      renderCastStatus();
+    })
+    .catch(() => {});
+}
+
+function controlCast(service, action) {
+  fetch(`/api/cast/${encodeURIComponent(service)}/${encodeURIComponent(action)}?pin=${encodeURIComponent(adminPin)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: adminPin }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+    .then(({ ok, data }) => {
+      if (!ok) {
+        toast(data.error || 'Cast action failed');
+        addLog(data.error || 'Cast action failed', 'error');
+        return;
+      }
+      castStatus = data.status;
+      renderCastStatus();
+      toast(`${service} ${action} requested`);
+      addLog(`Native cast ${service} ${action}: ${data.state}`);
+    })
+    .catch(() => {
+      toast('Cast action failed');
+      addLog('Cast action failed', 'error');
+    });
 }
 
 // Uptime ticker

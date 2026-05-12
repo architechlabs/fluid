@@ -1,0 +1,20 @@
+[Unit]
+Description=Fluid Native Cast Gateway
+After=network-online.target avahi-daemon.service fluid-display.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=fluid
+Group=fluid
+WorkingDirectory=/opt/fluid
+EnvironmentFile=-/etc/fluid/fluid.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/fluid/.Xauthority
+ExecStart=/bin/bash /opt/fluid/scripts/native-cast.sh run
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=fluid-native-cast
+
+[Install]
+WantedBy=multi-user.target

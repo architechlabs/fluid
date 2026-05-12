@@ -11,6 +11,7 @@ Users open one page from any laptop on the same network, share their screen, and
 - Full-screen HDMI display mode for the Pi
 - Auto-display of every active shared screen on HDMI
 - Responsive screen wall layout for multiple devices
+- Optional native cast gateway status for AirPlay/Miracast/Cast receiver work
 - WebRTC peer connection over LAN
 - Systemd services that start on boot
 - One installer that configures Node.js, Chromium, Xorg, logs, services, and HTTPS
@@ -59,6 +60,16 @@ For unattended installs:
 ```bash
 sudo bash install.sh --admin-pin 8432 --port 3000 --yes --no-reboot
 ```
+
+Optional native cast gateway helpers:
+
+```bash
+sudo bash install.sh --admin-pin 8432 --with-native-cast --cast-name Fluid
+```
+
+This is the one-command setup path for the native cast gateway. It installs discovery/receiver helpers when they are available in Raspberry Pi OS repositories, preserves an already configured Miracast link on reinstall, tries to auto-detect Miracast when possible, and exposes receiver status in the admin dashboard. Native casting is not one protocol; see [docs/NATIVE_CAST.md](docs/NATIVE_CAST.md).
+
+If native cast is already enabled, a later installer run keeps it enabled by default. Use `--no-native-cast` only when you intentionally want to turn those receiver services off.
 
 HTTPS is installed by default because browser screen sharing is blocked on plain HTTP from another device. The port you choose becomes the public HTTPS port. Fluid moves the Node.js app behind nginx on an internal local port automatically.
 
@@ -136,9 +147,16 @@ sudo systemctl restart fluid-display
 
 The installer configures Xorg kiosk permissions for Pi OS Lite using `/etc/X11/Xwrapper.config`.
 
-## Native Cast Menu
+## Native Cast Gateway
 
-Fluid does not appear inside Chrome's Cast picker as a native device. That menu discovers Cast-enabled receiver devices, not normal LAN web apps. See [docs/CAST.md](docs/CAST.md) for the exact boundary and the real options.
+Fluid's browser wall is the reliable multi-screen path. Native casting uses OS-level receiver protocols:
+
+- Apple/iPhone/macOS screen mirroring uses AirPlay.
+- Windows wireless display commonly uses Miracast.
+- Android may use Miracast or Google Cast depending on the phone/vendor.
+- Chrome's Cast picker discovers Cast receivers, not normal LAN web apps.
+
+Run the installer with `--with-native-cast` to enable the managed gateway layer and status dashboard. See [docs/NATIVE_CAST.md](docs/NATIVE_CAST.md) for the exact support matrix.
 
 ## Configuration
 
@@ -173,12 +191,18 @@ For local development, copy `.env.example` to `.env` and run `npm start`.
 ```bash
 sudo systemctl status fluid-server
 sudo systemctl status fluid-display
+sudo systemctl status fluid-native-cast
+sudo systemctl status fluid-miracast
 
 sudo systemctl restart fluid-server
 sudo systemctl restart fluid-display
+sudo systemctl restart fluid-native-cast
+sudo systemctl restart fluid-miracast
 
 sudo journalctl -u fluid-server -f
 sudo journalctl -u fluid-display -f
+sudo journalctl -u fluid-native-cast -f
+sudo journalctl -u fluid-miracast -f
 ```
 
 ## Local Development
@@ -213,6 +237,12 @@ npm run doctor
 --with-https          Install nginx reverse proxy with a self-signed cert, default
 --no-https            Skip HTTPS reverse proxy setup
 --https-name NAME     Certificate name/CN, default fluid.local
+--with-native-cast    Install optional native cast gateway helpers
+--no-native-cast      Disable optional native cast gateway helpers
+--cast-name NAME      Native cast receiver name, default Fluid
+--cast-mode MODE      Native receiver mode: all, airplay, or miracast
+--airplay-pin PIN     Optional 4-digit AirPlay PIN
+--miracast-link N     MiracleCast link id, default auto tries safe discovery
 --no-reboot           Do not prompt for reboot
 --no-start            Install only; do not start services
 -y, --yes             Use safe defaults for prompts
@@ -249,6 +279,9 @@ npm run doctor
 | nginx fails to start during install | Re-run the latest installer. It stops old Fluid services before nginx binds the public HTTPS port and prints any remaining port owner. |
 | Page says screen sharing is blocked | Open `https://<pi-ip>:<port>/client.html`, not `http://<pi-ip>:<port>/client.html`. |
 | Chrome Cast menu does not show Fluid | Chrome's Cast menu lists Chromecast/Miracast receivers, not ordinary LAN web apps. Use the Fluid client page, or install a separate OS-level cast receiver if you specifically need native Cast discovery. |
+| Native Cast says AirPlay missing | Re-run `sudo bash install.sh --with-native-cast`; if `uxplay` is not in your Raspberry Pi OS repository, install it from a trusted package source for your OS release. |
+| Miracast says needs-link | Re-run `sudo bash install.sh --with-native-cast --cast-name Fluid`. If auto-detection still cannot see the adapter link, run `sudo miracle-sinkctl`, copy the `[ADD] Link: N` number into `MIRACAST_LINK=N` in `/etc/fluid/fluid.env`, then restart `fluid-miracast`. |
+| Miracast not discoverable | Miracast requires Wi-Fi Direct sink support. Check Raspberry Pi wireless hardware/driver support and `sudo journalctl -u fluid-miracast -n 80 --no-pager`. |
 | Display stays on standby | Make sure at least one device is actively sharing, then click `Sync Wall` in the admin panel. |
 | TV image is stuck on the left half | Re-run `sudo bash install.sh`, reboot once, then check `KIOSK_WIDTH` and `KIOSK_HEIGHT` in `/etc/fluid/fluid.env` match the TV mode. |
 | Two laptops do not show together | Restart the display with `sudo systemctl restart fluid-display`, then click `Sync Wall`; every device with status `streaming` should appear as its own tile. |
@@ -271,6 +304,12 @@ PIN-protected device list:
 
 ```text
 GET /api/devices?pin=<admin-pin>
+```
+
+PIN-protected native cast status:
+
+```text
+GET /api/cast/status?pin=<admin-pin>
 ```
 
 ## Security Notes

@@ -115,6 +115,9 @@ for (const file of [
   'public/display.html',
   'systemd/fluid-server.service',
   'systemd/fluid-display.service',
+  'systemd/fluid-native-cast.service',
+  'systemd/fluid-miracast.service',
+  'scripts/native-cast.sh',
 ]) {
   exists(file);
 }

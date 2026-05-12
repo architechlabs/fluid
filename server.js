@@ -12,6 +12,7 @@ const path       = require('path');
 const { randomUUID } = require('crypto');
 const fs         = require('fs');
 const os         = require('os');
+const { execFileSync } = require('child_process');
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 loadEnvFile(path.join(__dirname, '.env'));
@@ -25,6 +26,10 @@ const MAX_DEVICES = readIntEnv('MAX_DEVICES', 20, 1, 250);
 const PUBLIC_DIR  = path.join(__dirname, 'public');
 const INDEX_FILE  = path.join(PUBLIC_DIR, 'index.html');
 const HTTPS_REDIRECT = readBoolEnv('HTTPS_REDIRECT', false);
+const NATIVE_CAST_ENABLED = readBoolEnv('NATIVE_CAST_ENABLED', false);
+const CAST_NAME = String(process.env.CAST_NAME || 'Fluid');
+const NATIVE_CAST_MODE = String(process.env.NATIVE_CAST_MODE || 'all');
+const MIRACAST_LINK = String(process.env.MIRACAST_LINK || 'auto');
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -242,6 +247,106 @@ function getServerInfo() {
     port:      PORT,
     publicPort: SERVER_PORT,
   };
+}
+
+function commandExists(commandName) {
+  try {
+    if (process.platform === 'win32') execFileSync('where.exe', [commandName], { stdio: 'ignore' });
+    else execFileSync('sh', ['-lc', `command -v ${commandName}`], { stdio: 'ignore' });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function serviceState(serviceName) {
+  if (process.platform === 'win32' || !commandExists('systemctl')) return 'unavailable';
+  try {
+    return execFileSync('systemctl', ['is-active', serviceName], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || 'unknown';
+  } catch (error) {
+    return String(error.stdout || '').trim() || 'inactive';
+  }
+}
+
+function getCastStatus() {
+  const airplayAvailable = commandExists('uxplay');
+  const miracastAvailable = commandExists('miracle-sinkctl') && commandExists('miracle-wifid');
+  const airplayService = serviceState('fluid-native-cast.service');
+  const miracastService = serviceState('fluid-miracast.service');
+  const miracastConfigured = MIRACAST_LINK !== 'auto';
+  return {
+    enabled: NATIVE_CAST_ENABLED,
+    name: CAST_NAME,
+    mode: NATIVE_CAST_MODE,
+    services: {
+      airplay: airplayService,
+      miracast: miracastService,
+    },
+    wallIntegration: 'browser-wall-plus-native-hdmi-receivers',
+    protocols: [
+      {
+        id: 'browser',
+        label: 'Fluid Browser Share',
+        status: 'ready',
+        discoverable: false,
+        wall: true,
+        note: 'Stable multi-screen wall using the Fluid client page.',
+      },
+      {
+        id: 'airplay',
+        label: 'Apple AirPlay',
+        status: !NATIVE_CAST_ENABLED ? 'disabled' : airplayAvailable ? airplayService : 'missing',
+        discoverable: NATIVE_CAST_ENABLED && airplayAvailable && airplayService === 'active',
+        wall: false,
+        note: airplayAvailable
+          ? 'Uses uxplay as the AirPlay receiver backend and renders on the Pi HDMI display.'
+          : 'Install uxplay on the Raspberry Pi to expose an AirPlay receiver.',
+      },
+      {
+        id: 'miracast',
+        label: 'Windows / Android Miracast',
+        status: !NATIVE_CAST_ENABLED ? 'disabled' : miracastAvailable ? (miracastConfigured ? miracastService : 'needs-link') : 'not-installed',
+        discoverable: NATIVE_CAST_ENABLED && miracastAvailable && miracastConfigured && miracastService === 'active',
+        wall: false,
+        note: miracastConfigured
+          ? 'Uses MiracleCast as the Wi-Fi Direct sink. Miracast can take over the Wi-Fi adapter while active.'
+          : 'Set MIRACAST_LINK in /etc/fluid/fluid.env after running sudo miracle-sinkctl once to discover the link id.',
+      },
+      {
+        id: 'google-cast',
+        label: 'Google Cast / Chromecast',
+        status: 'external',
+        discoverable: false,
+        wall: false,
+        note: 'Google Cast receiver discovery is tied to the Cast receiver ecosystem and cannot be implemented as a normal LAN web app alone.',
+      },
+    ],
+  };
+}
+
+function controlCastService(serviceId, action) {
+  const services = {
+    airplay: 'fluid-native-cast.service',
+    miracast: 'fluid-miracast.service',
+  };
+  const actions = new Set(['start', 'stop', 'restart']);
+  const serviceName = services[serviceId];
+  if (!serviceName || !actions.has(action)) {
+    return { ok: false, error: 'Unsupported cast service action' };
+  }
+  if (process.platform === 'win32' || !commandExists('systemctl')) {
+    return { ok: false, error: 'systemctl is not available on this machine' };
+  }
+  try {
+    if (typeof process.getuid === 'function' && process.getuid() !== 0 && commandExists('sudo')) {
+      execFileSync('sudo', ['systemctl', action, serviceName], { stdio: 'ignore' });
+    } else {
+      execFileSync('systemctl', [action, serviceName], { stdio: 'ignore' });
+    }
+    return { ok: true, service: serviceName, action, state: serviceState(serviceName) };
+  } catch (error) {
+    return { ok: false, service: serviceName, action, error: error.message, state: serviceState(serviceName) };
+  }
 }
 
 // ─── WebSocket Handler ────────────────────────────────────────────────────────
@@ -555,6 +660,23 @@ app.get('/api/devices', (req, res) => {
     return res.status(403).json({ error: 'Forbidden' });
   }
   res.json({ devices: getDeviceList(), activeDeviceId: getStreamingDeviceIds()[0] || null, activeDeviceIds: getStreamingDeviceIds() });
+});
+
+app.get('/api/cast/status', (req, res) => {
+  if (req.query.pin !== ADMIN_PIN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json(getCastStatus());
+});
+
+app.post('/api/cast/:service/:action', (req, res) => {
+  const pin = req.query.pin || req.body?.pin;
+  if (pin !== ADMIN_PIN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const result = controlCastService(req.params.service, req.params.action);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ...result, status: getCastStatus() });
 });
 
 // Catch-all → serve index

@@ -1,0 +1,20 @@
+[Unit]
+Description=Fluid Miracast Receiver
+After=network-online.target fluid-display.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/fluid
+EnvironmentFile=-/etc/fluid/fluid.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/fluid/.Xauthority
+ExecStart=/bin/bash /opt/fluid/scripts/native-cast.sh run-miracast
+Restart=on-failure
+RestartSec=8
+SyslogIdentifier=fluid-miracast
+
+[Install]
+WantedBy=multi-user.target

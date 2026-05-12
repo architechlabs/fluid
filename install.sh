@@ -25,6 +25,13 @@ WITH_HTTPS="true"
 HTTPS_NAME=""
 KIOSK_WIDTH=""
 KIOSK_HEIGHT=""
+WITH_NATIVE_CAST="false"
+NATIVE_CAST_FROM_ARGS="false"
+CAST_NAME="Fluid"
+NATIVE_CAST_MODE="all"
+AIRPLAY_PIN=""
+MIRACAST_LINK="auto"
+MIRACAST_LINK_FROM_ARGS="false"
 NO_REBOOT="false"
 NO_START="false"
 ASSUME_YES="false"
@@ -53,6 +60,12 @@ Options:
   --no-https            Skip HTTPS reverse proxy setup.
   --https-name NAME     Certificate name/CN. Default: fluid.local.
   --kiosk-size WxH      Force HDMI kiosk viewport. Default: auto-detect.
+  --with-native-cast    Install optional native cast gateway helpers.
+  --no-native-cast      Disable optional native cast gateway helpers.
+  --cast-name NAME      Native cast receiver name. Default: Fluid.
+  --cast-mode MODE      Native receiver mode: all, airplay, or miracast. Default: all.
+  --airplay-pin PIN     Optional 4-digit AirPlay PIN.
+  --miracast-link N     MiracleCast link id. Default auto tries safe discovery during install.
   --no-reboot           Do not prompt for reboot.
   --no-start            Install only; do not start services.
   -y, --yes             Use safe defaults for prompts.
@@ -76,6 +89,12 @@ while [[ $# -gt 0 ]]; do
     --with-https) WITH_HTTPS="true"; shift ;;
     --no-https) WITH_HTTPS="false"; shift ;;
     --https-name) HTTPS_NAME="${2:-}"; shift 2 ;;
+    --with-native-cast) WITH_NATIVE_CAST="true"; NATIVE_CAST_FROM_ARGS="true"; shift ;;
+    --no-native-cast) WITH_NATIVE_CAST="false"; NATIVE_CAST_FROM_ARGS="true"; shift ;;
+    --cast-name) CAST_NAME="${2:-}"; shift 2 ;;
+    --cast-mode) NATIVE_CAST_MODE="${2:-}"; shift 2 ;;
+    --airplay-pin) AIRPLAY_PIN="${2:-}"; shift 2 ;;
+    --miracast-link) MIRACAST_LINK="${2:-}"; MIRACAST_LINK_FROM_ARGS="true"; shift 2 ;;
     --kiosk-size)
       KIOSK_WIDTH="${2%x*}"
       KIOSK_HEIGHT="${2#*x}"
@@ -133,6 +152,12 @@ validate_config() {
     (( KIOSK_HEIGHT >= 480 && KIOSK_HEIGHT <= 4320 )) || err "Kiosk height must be between 480 and 4320."
   fi
   [[ -n "$ADMIN_PIN" ]] || err "Admin PIN cannot be empty."
+  [[ -n "$CAST_NAME" ]] || err "Cast name cannot be empty."
+  [[ "$NATIVE_CAST_MODE" =~ ^(all|airplay|miracast)$ ]] || err "Cast mode must be all, airplay, or miracast."
+  if [[ -n "$AIRPLAY_PIN" ]]; then
+    [[ "$AIRPLAY_PIN" =~ ^[0-9]{4}$ ]] || err "AirPlay PIN must be exactly 4 digits."
+  fi
+  [[ "$MIRACAST_LINK" == "auto" || "$MIRACAST_LINK" =~ ^[0-9]+$ ]] || err "Miracast link must be auto or a number."
 
   if [[ "$ADMIN_PIN" == "0000" ]]; then
     warn "Default admin PIN is enabled. Change it after install in ${CONFIG_DIR}/fluid.env."
@@ -156,9 +181,32 @@ choose_app_port() {
   fi
 }
 
+load_existing_native_cast_config() {
+  [[ -f "$CONFIG_DIR/fluid.env" ]] || return 0
+
+  local existing_enabled
+  existing_enabled="$(awk -F= '/^NATIVE_CAST_ENABLED=/{print $2; exit}' "$CONFIG_DIR/fluid.env" 2>/dev/null || true)"
+  if [[ "$NATIVE_CAST_FROM_ARGS" == "false" && "$existing_enabled" == "true" ]]; then
+    WITH_NATIVE_CAST="true"
+    log "Keeping existing native cast gateway enabled"
+  fi
+
+  [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
+  [[ "$MIRACAST_LINK_FROM_ARGS" == "false" ]] || return 0
+
+  local existing_link
+  existing_link="$(awk -F= '/^MIRACAST_LINK=/{print $2; exit}' "$CONFIG_DIR/fluid.env" 2>/dev/null || true)"
+  if [[ "$existing_link" =~ ^[0-9]+$ ]]; then
+    MIRACAST_LINK="$existing_link"
+    log "Keeping existing Miracast link ${MIRACAST_LINK}"
+  fi
+}
+
 stop_existing_services() {
   step "Stopping existing services"
   systemctl stop fluid-display.service >/dev/null 2>&1 || true
+  systemctl stop fluid-native-cast.service >/dev/null 2>&1 || true
+  systemctl stop fluid-miracast.service >/dev/null 2>&1 || true
   systemctl stop fluid-server.service >/dev/null 2>&1 || true
   systemctl stop nginx.service >/dev/null 2>&1 || true
   log "Existing Fluid/nginx services stopped"
@@ -185,6 +233,7 @@ install_packages() {
     lsb-release \
     openbox \
     rsync \
+    sudo \
     unclutter \
     wget \
     xdotool \
@@ -205,6 +254,55 @@ install_packages() {
   fi
 
   log "System packages ready"
+}
+
+install_native_cast_packages() {
+  [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
+
+  step "Installing native cast gateway packages"
+  apt-get install -y -qq avahi-daemon iw
+
+  if apt-cache show uxplay >/dev/null 2>&1; then
+    apt-get install -y -qq uxplay
+    log "AirPlay receiver package uxplay installed"
+  else
+    warn "uxplay is not available in these apt repositories; AirPlay receiver cannot be installed automatically."
+  fi
+
+  if apt-cache show miraclecast >/dev/null 2>&1; then
+    apt-get install -y -qq miraclecast || warn "miraclecast package could not be installed automatically."
+  else
+    warn "miraclecast is not available in these apt repositories; Miracast remains a detected/manual backend."
+  fi
+
+  systemctl enable avahi-daemon >/dev/null 2>&1 || true
+  log "Native cast package step complete"
+}
+
+discover_miracast_link() {
+  [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
+  [[ "$MIRACAST_LINK" == "auto" ]] || return 0
+  [[ "$NATIVE_CAST_MODE" =~ ^(all|miracast)$ ]] || return 0
+  command -v miracle-wifid >/dev/null 2>&1 || return 0
+  command -v miracle-sinkctl >/dev/null 2>&1 || return 0
+
+  step "Auto-detecting Miracast link"
+  local output link wifid_pid
+  miracle-wifid --log-level info >/tmp/fluid-miracle-wifid.log 2>&1 &
+  wifid_pid="$!"
+  sleep 2
+  output="$(timeout 12s miracle-sinkctl 2>&1 || true)"
+  kill "$wifid_pid" >/dev/null 2>&1 || true
+  wait "$wifid_pid" >/dev/null 2>&1 || true
+
+  link="$(printf "%s\n" "$output" | awk '/\[ADD\][[:space:]]+Link:/ {print $NF; exit}')"
+  if [[ "$link" =~ ^[0-9]+$ ]]; then
+    MIRACAST_LINK="$link"
+    log "Miracast link auto-detected: ${MIRACAST_LINK}"
+  else
+    warn "Could not auto-detect a Miracast link. The install will continue with MIRACAST_LINK=auto."
+    warn "The browser wall and AirPlay are unaffected. Check Native Cast in the admin dashboard after boot."
+  fi
 }
 
 install_node() {
@@ -290,6 +388,15 @@ MAX_DEVICES=${MAX_DEVICES}
 LOG_FILE=${LOG_DIR}/server.log
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
+NATIVE_CAST_ENABLED=${WITH_NATIVE_CAST}
+CAST_NAME=${CAST_NAME}
+NATIVE_CAST_MODE=${NATIVE_CAST_MODE}
+AIRPLAY_ENABLED=true
+AIRPLAY_PIN=${AIRPLAY_PIN}
+MIRACAST_ENABLED=true
+MIRACAST_LINK=${MIRACAST_LINK}
+MIRACAST_RTSP_PORT=7236
+MIRACAST_SCALE=1920x1080
 # Override to force the kiosk to open a different address:
 SERVER_URL=${kiosk_url}
 EOF
@@ -308,9 +415,11 @@ EOF
 
 install_services() {
   step "Installing systemd services"
-  local server_tmp display_tmp
+  local server_tmp display_tmp cast_tmp miracast_tmp
   server_tmp="$(mktemp)"
   display_tmp="$(mktemp)"
+  cast_tmp="$(mktemp)"
+  miracast_tmp="$(mktemp)"
 
   sed \
     -e "s|User=fluid|User=${SERVICE_USER}|g" \
@@ -326,14 +435,50 @@ install_services() {
     -e "s|/home/fluid/.Xauthority|/home/${SERVICE_USER}/.Xauthority|g" \
     "$SCRIPT_DIR/systemd/fluid-display.service" > "$display_tmp"
 
+  sed \
+    -e "s|User=fluid|User=${SERVICE_USER}|g" \
+    -e "s|Group=fluid|Group=${SERVICE_USER}|g" \
+    -e "s|WorkingDirectory=/opt/fluid|WorkingDirectory=${INSTALL_DIR}|g" \
+    -e "s|/opt/fluid/scripts/native-cast.sh|${INSTALL_DIR}/scripts/native-cast.sh|g" \
+    -e "s|/home/fluid/.Xauthority|/home/${SERVICE_USER}/.Xauthority|g" \
+    "$SCRIPT_DIR/systemd/fluid-native-cast.service" > "$cast_tmp"
+
+  sed \
+    -e "s|WorkingDirectory=/opt/fluid|WorkingDirectory=${INSTALL_DIR}|g" \
+    -e "s|/opt/fluid/scripts/native-cast.sh|${INSTALL_DIR}/scripts/native-cast.sh|g" \
+    -e "s|/home/fluid/.Xauthority|/home/${SERVICE_USER}/.Xauthority|g" \
+    "$SCRIPT_DIR/systemd/fluid-miracast.service" > "$miracast_tmp"
+
   install -m 0644 "$server_tmp" /etc/systemd/system/fluid-server.service
   install -m 0644 "$display_tmp" /etc/systemd/system/fluid-display.service
-  rm -f "$server_tmp" "$display_tmp"
+  install -m 0644 "$cast_tmp" /etc/systemd/system/fluid-native-cast.service
+  install -m 0644 "$miracast_tmp" /etc/systemd/system/fluid-miracast.service
+  rm -f "$server_tmp" "$display_tmp" "$cast_tmp" "$miracast_tmp"
 
   systemctl daemon-reload
   systemctl enable fluid-server.service
   systemctl enable fluid-display.service
+  if [[ "$WITH_NATIVE_CAST" == "true" ]]; then
+    systemctl enable fluid-native-cast.service
+    systemctl enable fluid-miracast.service
+  else
+    systemctl disable fluid-native-cast.service >/dev/null 2>&1 || true
+    systemctl disable fluid-miracast.service >/dev/null 2>&1 || true
+  fi
   log "Services enabled"
+}
+
+configure_cast_sudoers() {
+  [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
+
+  step "Configuring native cast service controls"
+  cat > /etc/sudoers.d/fluid-cast-control <<EOF
+${SERVICE_USER} ALL=(root) NOPASSWD: /bin/systemctl start fluid-native-cast.service, /bin/systemctl stop fluid-native-cast.service, /bin/systemctl restart fluid-native-cast.service, /bin/systemctl start fluid-miracast.service, /bin/systemctl stop fluid-miracast.service, /bin/systemctl restart fluid-miracast.service
+${SERVICE_USER} ALL=(root) NOPASSWD: /usr/bin/systemctl start fluid-native-cast.service, /usr/bin/systemctl stop fluid-native-cast.service, /usr/bin/systemctl restart fluid-native-cast.service, /usr/bin/systemctl start fluid-miracast.service, /usr/bin/systemctl stop fluid-miracast.service, /usr/bin/systemctl restart fluid-miracast.service
+EOF
+  chmod 0440 /etc/sudoers.d/fluid-cast-control
+  visudo -cf /etc/sudoers.d/fluid-cast-control >/dev/null
+  log "Native cast admin controls allowed for ${SERVICE_USER}"
 }
 
 set_boot_config() {
@@ -453,6 +598,10 @@ start_services() {
   step "Starting services"
   systemctl restart fluid-server.service
   systemctl restart fluid-display.service || warn "Display service did not start yet. It may need HDMI/Xorg and a reboot."
+  if [[ "$WITH_NATIVE_CAST" == "true" ]]; then
+    systemctl restart fluid-native-cast.service || warn "Native cast gateway did not start. Check sudo journalctl -u fluid-native-cast -n 80 --no-pager."
+    systemctl restart fluid-miracast.service || warn "Miracast receiver did not start. Check sudo journalctl -u fluid-miracast -n 80 --no-pager."
+  fi
   log "Server service started"
 }
 
@@ -495,8 +644,10 @@ print_summary() {
   printf "\nUseful commands:\n"
   printf "  sudo systemctl status fluid-server\n"
   printf "  sudo journalctl -u fluid-server -f\n"
+  printf "  sudo journalctl -u fluid-native-cast -f\n"
+  printf "  sudo journalctl -u fluid-miracast -f\n"
   printf "  sudo nano %s/fluid.env\n" "$CONFIG_DIR"
-  printf "  sudo systemctl restart fluid-server fluid-display\n"
+  printf "  sudo systemctl restart fluid-server fluid-display fluid-native-cast fluid-miracast\n"
 }
 
 maybe_reboot() {
@@ -515,16 +666,20 @@ main() {
   printf "Screen sharing hub for Raspberry Pi\n\n"
 
   prompt_if_needed
+  load_existing_native_cast_config
   validate_config
   choose_app_port
   stop_existing_services
   install_packages
+  install_native_cast_packages
+  discover_miracast_link
   install_node
   create_user_and_dirs
   configure_xorg_kiosk
   install_app
   write_config
   install_services
+  configure_cast_sudoers
   configure_boot
   configure_https
   start_services
