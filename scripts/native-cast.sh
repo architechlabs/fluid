@@ -5,6 +5,15 @@
 set -Eeuo pipefail
 
 MODE="${1:-status}"
+CONFIG_FILE="${FLUID_CONFIG:-/etc/fluid/fluid.env}"
+
+if [[ -f "$CONFIG_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$CONFIG_FILE"
+  set +a
+fi
+
 NATIVE_CAST_ENABLED="${NATIVE_CAST_ENABLED:-false}"
 CAST_NAME="${CAST_NAME:-Fluid}"
 NATIVE_CAST_MODE="${NATIVE_CAST_MODE:-all}"
@@ -66,10 +75,22 @@ EOF
 }
 
 doctor() {
+  local airplay_service="unavailable"
+  local miracast_service="unavailable"
+  if have systemctl; then
+    airplay_service="$(systemctl is-active fluid-native-cast.service 2>/dev/null || true)"
+    miracast_service="$(systemctl is-active fluid-miracast.service 2>/dev/null || true)"
+    [[ -n "$airplay_service" ]] || airplay_service="inactive"
+    [[ -n "$miracast_service" ]] || miracast_service="inactive"
+  fi
+
   echo "Fluid Native Cast Gateway"
   echo "Name: ${CAST_NAME}"
   echo "Enabled: ${NATIVE_CAST_ENABLED}"
   echo "Mode: ${NATIVE_CAST_MODE}"
+  echo "Config: ${CONFIG_FILE}"
+  echo "AirPlay service: ${airplay_service}"
+  echo "Miracast service: ${miracast_service}"
   if have uxplay; then
     echo "[ok] uxplay found for AirPlay"
   else
@@ -83,6 +104,14 @@ doctor() {
   if have iw; then
     echo "[info] Wi-Fi interfaces: $(iw dev 2>/dev/null | awk '$1=="Interface"{print $2}' | paste -sd, -)"
   fi
+  if [[ "$MIRACAST_LINK" == "auto" ]]; then
+    echo "[warn] MIRACAST_LINK is auto; Windows Miracast may not become discoverable until a numeric link id is detected"
+  else
+    echo "[ok] MIRACAST_LINK=${MIRACAST_LINK}"
+  fi
+  echo "[info] iPhone/macOS look in Screen Mirroring/AirPlay, not Chrome Cast"
+  echo "[info] Windows uses Wireless Display/Miracast, not Chrome Cast"
+  echo "[info] Many Android phones use Google Cast, not Miracast"
   echo "[info] Google Cast receiver support requires an external Cast receiver implementation"
 }
 

@@ -605,6 +605,19 @@ start_services() {
   log "Server service started"
 }
 
+print_native_cast_summary() {
+  [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
+  [[ -x "$INSTALL_DIR/scripts/native-cast.sh" ]] || return 0
+
+  printf "\n%bNative cast check%b\n" "$BOLD$BLUE" "$NC"
+  FLUID_CONFIG="$CONFIG_DIR/fluid.env" "$INSTALL_DIR/scripts/native-cast.sh" doctor || true
+  printf "\n"
+  printf "Discovery expectations:\n"
+  printf "  iPhone/macOS: use Screen Mirroring/AirPlay and look for %s.\n" "$CAST_NAME"
+  printf "  Windows: use Wireless Display/Miracast; Chrome Cast will not list Fluid.\n"
+  printf "  Android: many phones use Google Cast, which needs an external Cast receiver.\n"
+}
+
 print_summary() {
   local ips
   ips="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)"
@@ -683,6 +696,7 @@ main() {
   configure_boot
   configure_https
   start_services
+  print_native_cast_summary
   print_summary
   maybe_reboot
 }
