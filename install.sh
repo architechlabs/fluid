@@ -260,7 +260,7 @@ install_native_cast_packages() {
   [[ "$WITH_NATIVE_CAST" == "true" ]] || return 0
 
   step "Installing native cast gateway packages"
-  apt-get install -y -qq avahi-daemon iw
+  apt-get install -y -qq avahi-daemon avahi-utils iw
 
   local airplay_runtime_packages=(
     gstreamer1.0-libav
@@ -415,6 +415,7 @@ CAST_NAME=${CAST_NAME}
 NATIVE_CAST_MODE=${NATIVE_CAST_MODE}
 AIRPLAY_ENABLED=true
 AIRPLAY_PIN=${AIRPLAY_PIN}
+AIRPLAY_EXTRA_ARGS=-p
 MIRACAST_ENABLED=true
 MIRACAST_LINK=${MIRACAST_LINK}
 MIRACAST_RTSP_PORT=7236
