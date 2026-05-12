@@ -18,8 +18,11 @@ CONFIG_DIR="/etc/fluid"
 LOG_DIR="/var/log/fluid"
 NODE_VERSION="20"
 SERVER_PORT="3000"
+SERVER_PORT_FROM_ARGS="false"
 APP_PORT=""
+APP_PORT_FROM_ARGS="false"
 ADMIN_PIN=""
+ADMIN_PIN_FROM_ARGS="false"
 MAX_DEVICES="20"
 WITH_HTTPS="true"
 HTTPS_NAME=""
@@ -80,9 +83,9 @@ USAGE
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --admin-pin) ADMIN_PIN="${2:-}"; shift 2 ;;
-    --port) SERVER_PORT="${2:-}"; shift 2 ;;
-    --app-port) APP_PORT="${2:-}"; shift 2 ;;
+    --admin-pin) ADMIN_PIN="${2:-}"; ADMIN_PIN_FROM_ARGS="true"; shift 2 ;;
+    --port) SERVER_PORT="${2:-}"; SERVER_PORT_FROM_ARGS="true"; shift 2 ;;
+    --app-port) APP_PORT="${2:-}"; APP_PORT_FROM_ARGS="true"; shift 2 ;;
     --max-devices) MAX_DEVICES="${2:-}"; shift 2 ;;
     --install-dir) INSTALL_DIR="${2:-}"; shift 2 ;;
     --user) SERVICE_USER="${2:-}"; shift 2 ;;
@@ -117,6 +120,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 is_number() {
   [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+read_existing_config_value() {
+  local key="$1"
+  [[ -f "$CONFIG_DIR/fluid.env" ]] || return 0
+  awk -F= -v key="$key" '$1 == key {print substr($0, length(key) + 2); exit}' "$CONFIG_DIR/fluid.env" 2>/dev/null || true
+}
+
+load_existing_install_config() {
+  [[ -f "$CONFIG_DIR/fluid.env" ]] || return 0
+
+  local existing_value
+  if [[ "$ADMIN_PIN_FROM_ARGS" == "false" && -z "$ADMIN_PIN" ]]; then
+    existing_value="$(read_existing_config_value ADMIN_PIN)"
+    [[ -n "$existing_value" ]] && ADMIN_PIN="$existing_value"
+  fi
+  if [[ "$SERVER_PORT_FROM_ARGS" == "false" ]]; then
+    existing_value="$(read_existing_config_value SERVER_PORT)"
+    [[ "$existing_value" =~ ^[0-9]+$ ]] && SERVER_PORT="$existing_value"
+  fi
+  if [[ "$APP_PORT_FROM_ARGS" == "false" ]]; then
+    existing_value="$(read_existing_config_value PORT)"
+    [[ "$existing_value" =~ ^[0-9]+$ ]] && APP_PORT="$existing_value"
+  fi
 }
 
 prompt_if_needed() {
@@ -415,7 +442,7 @@ CAST_NAME=${CAST_NAME}
 NATIVE_CAST_MODE=${NATIVE_CAST_MODE}
 AIRPLAY_ENABLED=true
 AIRPLAY_PIN=${AIRPLAY_PIN}
-AIRPLAY_EXTRA_ARGS=-p
+AIRPLAY_EXTRA_ARGS=-p -avdec -vs ximagesink
 MIRACAST_ENABLED=true
 MIRACAST_LINK=${MIRACAST_LINK}
 MIRACAST_RTSP_PORT=7236
@@ -701,6 +728,7 @@ main() {
   printf "\n%bFluid installer%b\n" "$BOLD$BLUE" "$NC"
   printf "Screen sharing hub for Raspberry Pi\n\n"
 
+  load_existing_install_config
   prompt_if_needed
   load_existing_native_cast_config
   validate_config

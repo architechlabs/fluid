@@ -33,6 +33,13 @@ KIOSK_HEIGHT="${KIOSK_HEIGHT:-1080}"
 # Hide cursor (requires unclutter)
 command -v unclutter >/dev/null 2>&1 && unclutter -idle 1 -root &
 
+# Run a tiny window manager so native receiver windows can be raised above the
+# browser kiosk when a protocol such as AirPlay renders outside Fluid.
+if command -v openbox >/dev/null 2>&1; then
+  openbox >/tmp/fluid-openbox.log 2>&1 &
+  sleep 1
+fi
+
 # Kill any existing Chromium instances
 pkill -f chromium 2>/dev/null || true
 sleep 1

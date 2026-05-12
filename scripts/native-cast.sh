@@ -19,7 +19,8 @@ CAST_NAME="${CAST_NAME:-Fluid}"
 NATIVE_CAST_MODE="${NATIVE_CAST_MODE:-all}"
 AIRPLAY_ENABLED="${AIRPLAY_ENABLED:-true}"
 AIRPLAY_PIN="${AIRPLAY_PIN:-}"
-AIRPLAY_EXTRA_ARGS="${AIRPLAY_EXTRA_ARGS:--p}"
+AIRPLAY_EXTRA_ARGS="${AIRPLAY_EXTRA_ARGS:--p -avdec -vs ximagesink}"
+AIRPLAY_DISPLAY_TIMEOUT="${AIRPLAY_DISPLAY_TIMEOUT:-45}"
 MIRACAST_ENABLED="${MIRACAST_ENABLED:-true}"
 MIRACAST_LINK="${MIRACAST_LINK:-auto}"
 MIRACAST_RTSP_PORT="${MIRACAST_RTSP_PORT:-7236}"
@@ -134,6 +135,20 @@ run_airplay() {
     echo "uxplay is not installed; AirPlay receiver cannot start."
     echo "Re-run install.sh --with-native-cast, or install uxplay from your Raspberry Pi OS repositories."
     exit 0
+  fi
+  if have xset; then
+    echo "Waiting for HDMI X display ${DISPLAY:-:0}"
+    for _ in $(seq 1 "$AIRPLAY_DISPLAY_TIMEOUT"); do
+      if xset q >/dev/null 2>&1; then
+        break
+      fi
+      sleep 1
+    done
+    if ! xset q >/dev/null 2>&1; then
+      echo "AirPlay receiver cannot start because the HDMI X display is not ready."
+      echo "Check: sudo systemctl status fluid-display"
+      exit 0
+    fi
   fi
   if ! have gst-inspect-1.0 || ! gst-inspect-1.0 videoparsersbad >/dev/null 2>&1; then
     echo "AirPlay receiver cannot start because GStreamer videoparsersbad is missing."

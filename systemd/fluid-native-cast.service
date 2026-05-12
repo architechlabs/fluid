@@ -1,7 +1,7 @@
 [Unit]
 Description=Fluid Native Cast Gateway
 After=network-online.target avahi-daemon.service fluid-display.service
-Wants=network-online.target
+Wants=network-online.target fluid-display.service
 
 [Service]
 Type=simple
