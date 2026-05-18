@@ -8,7 +8,7 @@ ACTION="${1:-status}"
 REQUESTED_MODE="${2:-}"
 CONFIG_FILE="${FLUID_CONFIG:-/etc/fluid/fluid.env}"
 
-if [[ -f "$CONFIG_FILE" ]]; then
+if [[ -r "$CONFIG_FILE" ]]; then
   set -a
   # shellcheck disable=SC1090
   source "$CONFIG_FILE"
