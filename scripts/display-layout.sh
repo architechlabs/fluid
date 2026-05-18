@@ -20,6 +20,7 @@ XAUTHORITY="${XAUTHORITY:-/home/${USER:-fluid}/.Xauthority}"
 STATE_DIR="${FLUID_STATE_DIR:-/var/lib/fluid}"
 MODE_FILE="${DISPLAY_LAYOUT_MODE_FILE:-${STATE_DIR}/display-layout.mode}"
 STATUS_FILE="${DISPLAY_LAYOUT_STATUS_FILE:-${STATE_DIR}/display-layout.status.json}"
+SIGNATURE_FILE="${DISPLAY_LAYOUT_SIGNATURE_FILE:-${STATE_DIR}/display-layout.signature}"
 DEFAULT_MODE="${DISPLAY_LAYOUT_MODE:-auto}"
 POLL_SECONDS="${DISPLAY_LAYOUT_POLL_SECONDS:-1}"
 MIN_NATIVE_WIDTH="${DISPLAY_LAYOUT_MIN_NATIVE_WIDTH:-360}"
@@ -46,6 +47,7 @@ prepare_state_dir() {
   STATE_DIR="/tmp/fluid"
   MODE_FILE="${STATE_DIR}/display-layout.mode"
   STATUS_FILE="${STATE_DIR}/display-layout.status.json"
+  SIGNATURE_FILE="${STATE_DIR}/display-layout.signature"
   mkdir -p "$STATE_DIR" 2>/dev/null || true
 }
 
@@ -205,6 +207,7 @@ raise_window() {
 }
 
 apply_layout() {
+  local force="${1:-false}"
   prepare_state_dir
   display_ready || {
     write_status "$(read_mode)" "waiting-for-display" "" ""
@@ -233,6 +236,14 @@ apply_layout() {
     fi
   elif [[ "$mode" =~ ^(split|native)$ && $native_count -eq 0 ]]; then
     effective="browser"
+  fi
+
+  local signature previous_signature
+  signature="${mode}|${effective}|${width}x${height}|${browser}|${native_list}"
+  previous_signature="$(cat "$SIGNATURE_FILE" 2>/dev/null || true)"
+  if [[ "$force" != "true" && "$signature" == "$previous_signature" ]]; then
+    write_status "$mode" "$effective" "$browser" "$native_list"
+    return 0
   fi
 
   case "$effective" in
@@ -284,6 +295,7 @@ apply_layout() {
       ;;
   esac
 
+  printf "%s\n" "$signature" > "$SIGNATURE_FILE" 2>/dev/null || true
   write_status "$mode" "$effective" "$browser" "$native_list"
 }
 
@@ -310,9 +322,6 @@ EOF
 
 status_json() {
   prepare_state_dir
-  if display_ready && have xdotool; then
-    apply_layout >/dev/null 2>&1 || true
-  fi
   if [[ -f "$STATUS_FILE" ]]; then
     cat "$STATUS_FILE"
   else
@@ -332,6 +341,7 @@ EOF
 
 watch_layout() {
   prepare_state_dir
+  printf "" > "$SIGNATURE_FILE" 2>/dev/null || true
   valid_mode "$(read_mode)" || write_mode "auto"
   while true; do
     apply_layout || true
@@ -344,7 +354,7 @@ case "$ACTION" in
   apply) apply_layout ;;
   set)
     write_mode "$REQUESTED_MODE"
-    apply_layout || true
+    apply_layout true || true
     status_json
     ;;
   watch) watch_layout ;;
