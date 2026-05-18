@@ -56,6 +56,7 @@ fi
 # Server URL - using localhost since display runs on the Pi by default
 SERVER_PORT="${SERVER_PORT:-3000}"
 SERVER_URL="${SERVER_URL:-http://localhost:${SERVER_PORT}/display.html}"
+CHROMIUM_LOCKED_KIOSK="${CHROMIUM_LOCKED_KIOSK:-false}"
 
 CHROMIUM_BIN="${CHROMIUM_BIN:-}"
 if [ -z "$CHROMIUM_BIN" ]; then
@@ -67,9 +68,15 @@ if [ -z "$CHROMIUM_BIN" ]; then
   exit 1
 fi
 
-# Launch Chromium in kiosk mode
+# Launch Chromium as an app window. Strict Chromium kiosk mode resists resizing,
+# so the default keeps the window manageable by Fluid's display layout service.
+CHROMIUM_ARGS=()
+if [ "$CHROMIUM_LOCKED_KIOSK" = "true" ]; then
+  CHROMIUM_ARGS+=(--kiosk)
+fi
+
 exec "$CHROMIUM_BIN" \
-  --kiosk \
+  "${CHROMIUM_ARGS[@]}" \
   --no-sandbox \
   --disable-infobars \
   --disable-session-crashed-bubble \

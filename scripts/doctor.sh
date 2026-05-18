@@ -35,8 +35,10 @@ check_file "public/display.html"
 check_file "install.sh"
 check_file "systemd/fluid-server.service"
 check_file "systemd/fluid-display.service"
+check_file "systemd/fluid-display-layout.service"
 check_file "systemd/fluid-native-cast.service"
 check_file "systemd/fluid-miracast.service"
+check_file "scripts/display-layout.sh"
 check_file "scripts/native-cast.sh"
 
 printf "\nRuntime\n"
@@ -78,7 +80,7 @@ fi
 
 printf "\nServices\n"
 if command -v systemctl >/dev/null 2>&1; then
-  for service in fluid-server fluid-display fluid-native-cast fluid-miracast; do
+  for service in fluid-server fluid-display fluid-display-layout fluid-native-cast fluid-miracast; do
     if systemctl list-unit-files "${service}.service" >/dev/null 2>&1; then
       state="$(systemctl is-active "$service" 2>/dev/null || true)"
       if [[ "$state" == "active" ]]; then

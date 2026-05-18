@@ -1,0 +1,20 @@
+[Unit]
+Description=Fluid HDMI Display Layout Manager
+After=fluid-display.service
+Wants=fluid-display.service
+
+[Service]
+Type=simple
+User=fluid
+Group=fluid
+WorkingDirectory=/opt/fluid
+EnvironmentFile=-/etc/fluid/fluid.env
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/fluid/.Xauthority
+ExecStart=/bin/bash /opt/fluid/scripts/display-layout.sh watch
+Restart=always
+RestartSec=2
+SyslogIdentifier=fluid-display-layout
+
+[Install]
+WantedBy=multi-user.target

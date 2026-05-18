@@ -16,6 +16,7 @@ INSTALL_DIR="/opt/fluid"
 SERVICE_USER="fluid"
 CONFIG_DIR="/etc/fluid"
 LOG_DIR="/var/log/fluid"
+STATE_DIR="/var/lib/fluid"
 NODE_VERSION="20"
 SERVER_PORT="3000"
 SERVER_PORT_FROM_ARGS="false"
@@ -232,6 +233,7 @@ load_existing_native_cast_config() {
 stop_existing_services() {
   step "Stopping existing services"
   systemctl stop fluid-display.service >/dev/null 2>&1 || true
+  systemctl stop fluid-display-layout.service >/dev/null 2>&1 || true
   systemctl stop fluid-native-cast.service >/dev/null 2>&1 || true
   systemctl stop fluid-miracast.service >/dev/null 2>&1 || true
   systemctl stop fluid-server.service >/dev/null 2>&1 || true
@@ -263,6 +265,7 @@ install_packages() {
     sudo \
     unclutter \
     wget \
+    wmctrl \
     xdotool \
     xinit \
     xorg \
@@ -379,9 +382,11 @@ create_user_and_dirs() {
   fi
 
   usermod -aG video,audio,input,render "$SERVICE_USER" || true
-  mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
+  mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$STATE_DIR"
   chown -R "$SERVICE_USER:$SERVICE_USER" "$LOG_DIR"
+  chown -R "$SERVICE_USER:$SERVICE_USER" "$STATE_DIR"
   chmod 755 "$LOG_DIR"
+  chmod 755 "$STATE_DIR"
 }
 
 configure_xorg_kiosk() {
@@ -435,8 +440,10 @@ SERVER_PORT=${SERVER_PORT}
 ADMIN_PIN=${ADMIN_PIN}
 MAX_DEVICES=${MAX_DEVICES}
 LOG_FILE=${LOG_DIR}/server.log
+FLUID_STATE_DIR=${STATE_DIR}
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
+DISPLAY_LAYOUT_MODE=auto
 NATIVE_CAST_ENABLED=${WITH_NATIVE_CAST}
 CAST_NAME=${CAST_NAME}
 NATIVE_CAST_MODE=${NATIVE_CAST_MODE}
@@ -465,9 +472,10 @@ EOF
 
 install_services() {
   step "Installing systemd services"
-  local server_tmp display_tmp cast_tmp miracast_tmp
+  local server_tmp display_tmp layout_tmp cast_tmp miracast_tmp
   server_tmp="$(mktemp)"
   display_tmp="$(mktemp)"
+  layout_tmp="$(mktemp)"
   cast_tmp="$(mktemp)"
   miracast_tmp="$(mktemp)"
 
@@ -476,6 +484,7 @@ install_services() {
     -e "s|Group=fluid|Group=${SERVICE_USER}|g" \
     -e "s|WorkingDirectory=/opt/fluid|WorkingDirectory=${INSTALL_DIR}|g" \
     -e "s|ExecStart=/usr/bin/node /opt/fluid/server.js|ExecStart=/usr/bin/node ${INSTALL_DIR}/server.js|g" \
+    -e "s|^ReadWritePaths=.*|ReadWritePaths=${LOG_DIR} ${STATE_DIR}|g" \
     "$SCRIPT_DIR/systemd/fluid-server.service" > "$server_tmp"
 
   sed \
@@ -484,6 +493,14 @@ install_services() {
     -e "s|/opt/fluid/start-kiosk.sh|${INSTALL_DIR}/start-kiosk.sh|g" \
     -e "s|/home/fluid/.Xauthority|/home/${SERVICE_USER}/.Xauthority|g" \
     "$SCRIPT_DIR/systemd/fluid-display.service" > "$display_tmp"
+
+  sed \
+    -e "s|User=fluid|User=${SERVICE_USER}|g" \
+    -e "s|Group=fluid|Group=${SERVICE_USER}|g" \
+    -e "s|WorkingDirectory=/opt/fluid|WorkingDirectory=${INSTALL_DIR}|g" \
+    -e "s|/opt/fluid/scripts/display-layout.sh|${INSTALL_DIR}/scripts/display-layout.sh|g" \
+    -e "s|/home/fluid/.Xauthority|/home/${SERVICE_USER}/.Xauthority|g" \
+    "$SCRIPT_DIR/systemd/fluid-display-layout.service" > "$layout_tmp"
 
   sed \
     -e "s|User=fluid|User=${SERVICE_USER}|g" \
@@ -501,13 +518,15 @@ install_services() {
 
   install -m 0644 "$server_tmp" /etc/systemd/system/fluid-server.service
   install -m 0644 "$display_tmp" /etc/systemd/system/fluid-display.service
+  install -m 0644 "$layout_tmp" /etc/systemd/system/fluid-display-layout.service
   install -m 0644 "$cast_tmp" /etc/systemd/system/fluid-native-cast.service
   install -m 0644 "$miracast_tmp" /etc/systemd/system/fluid-miracast.service
-  rm -f "$server_tmp" "$display_tmp" "$cast_tmp" "$miracast_tmp"
+  rm -f "$server_tmp" "$display_tmp" "$layout_tmp" "$cast_tmp" "$miracast_tmp"
 
   systemctl daemon-reload
   systemctl enable fluid-server.service
   systemctl enable fluid-display.service
+  systemctl enable fluid-display-layout.service
   if [[ "$WITH_NATIVE_CAST" == "true" ]]; then
     systemctl enable fluid-native-cast.service
     systemctl enable fluid-miracast.service
@@ -648,6 +667,7 @@ start_services() {
   step "Starting services"
   systemctl restart fluid-server.service
   systemctl restart fluid-display.service || warn "Display service did not start yet. It may need HDMI/Xorg and a reboot."
+  systemctl restart fluid-display-layout.service || warn "Display layout manager did not start yet. Check sudo journalctl -u fluid-display-layout -n 80 --no-pager."
   if [[ "$WITH_NATIVE_CAST" == "true" ]]; then
     systemctl restart fluid-native-cast.service || warn "Native cast gateway did not start. Check sudo journalctl -u fluid-native-cast -n 80 --no-pager."
     systemctl restart fluid-miracast.service || warn "Miracast receiver did not start. Check sudo journalctl -u fluid-miracast -n 80 --no-pager."
@@ -707,10 +727,11 @@ print_summary() {
   printf "\nUseful commands:\n"
   printf "  sudo systemctl status fluid-server\n"
   printf "  sudo journalctl -u fluid-server -f\n"
+  printf "  sudo journalctl -u fluid-display-layout -f\n"
   printf "  sudo journalctl -u fluid-native-cast -f\n"
   printf "  sudo journalctl -u fluid-miracast -f\n"
   printf "  sudo nano %s/fluid.env\n" "$CONFIG_DIR"
-  printf "  sudo systemctl restart fluid-server fluid-display fluid-native-cast fluid-miracast\n"
+  printf "  sudo systemctl restart fluid-server fluid-display fluid-display-layout fluid-native-cast fluid-miracast\n"
 }
 
 maybe_reboot() {

@@ -30,6 +30,8 @@ const NATIVE_CAST_ENABLED = readBoolEnv('NATIVE_CAST_ENABLED', false);
 const CAST_NAME = String(process.env.CAST_NAME || 'Fluid');
 const NATIVE_CAST_MODE = String(process.env.NATIVE_CAST_MODE || 'all');
 const MIRACAST_LINK = String(process.env.MIRACAST_LINK || 'auto');
+const DISPLAY_LAYOUT_SCRIPT = path.join(__dirname, 'scripts', 'display-layout.sh');
+const DISPLAY_LAYOUT_MODES = new Set(['auto', 'browser', 'native', 'split']);
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -268,6 +270,67 @@ function serviceState(serviceName) {
   }
 }
 
+function runDisplayLayout(args) {
+  if (process.platform === 'win32' || !fs.existsSync(DISPLAY_LAYOUT_SCRIPT)) {
+    return { ok: false, error: 'Display layout manager is only available on the Raspberry Pi install.' };
+  }
+  try {
+    const output = execFileSync('bash', [DISPLAY_LAYOUT_SCRIPT, ...args], {
+      encoding: 'utf8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { ok: true, output };
+  } catch (error) {
+    return {
+      ok: false,
+      error: String(error.stderr || error.message || 'Display layout command failed').trim(),
+      output: String(error.stdout || '').trim(),
+    };
+  }
+}
+
+function parseDisplayLayoutStatus(output) {
+  try {
+    return JSON.parse(output);
+  } catch (_) {
+    return {
+      configuredMode: 'unknown',
+      effectiveMode: 'unknown',
+      browserWindows: 0,
+      nativeWindows: 0,
+      browserWindow: '',
+      nativeWindowIds: '',
+      updatedAt: '',
+    };
+  }
+}
+
+function getDisplayLayoutStatus() {
+  const result = runDisplayLayout(['status']);
+  if (!result.ok && !result.output) {
+    return {
+      available: false,
+      configuredMode: 'unavailable',
+      effectiveMode: 'unavailable',
+      browserWindows: 0,
+      nativeWindows: 0,
+      updatedAt: '',
+      error: result.error,
+    };
+  }
+  return { available: result.ok, ...parseDisplayLayoutStatus(result.output || '{}') };
+}
+
+function setDisplayLayoutMode(mode) {
+  if (!DISPLAY_LAYOUT_MODES.has(mode)) {
+    return { ok: false, error: 'Unsupported display layout mode' };
+  }
+  const result = runDisplayLayout(['set', mode]);
+  if (!result.ok) return result;
+  return { ok: true, status: { available: true, ...parseDisplayLayoutStatus(result.output || '{}') } };
+}
+
 function getCastStatus() {
   const airplayAvailable = commandExists('uxplay');
   const miracastAvailable = commandExists('miracle-sinkctl') && commandExists('miracle-wifid');
@@ -283,6 +346,7 @@ function getCastStatus() {
       miracast: miracastService,
     },
     wallIntegration: 'browser-wall-plus-native-hdmi-receivers',
+    displayLayout: getDisplayLayoutStatus(),
     protocols: [
       {
         id: 'browser',
@@ -297,9 +361,9 @@ function getCastStatus() {
         label: 'Apple AirPlay',
         status: !NATIVE_CAST_ENABLED ? 'disabled' : airplayAvailable ? airplayService : 'missing',
         discoverable: NATIVE_CAST_ENABLED && airplayAvailable && airplayService === 'active',
-        wall: false,
+        wall: true,
         note: airplayAvailable
-          ? 'Uses uxplay as the AirPlay receiver backend and renders on the Pi HDMI display.'
+          ? 'Uses uxplay as the AirPlay receiver backend. The display layout manager can mix it beside the Fluid browser wall.'
           : 'Install uxplay on the Raspberry Pi to expose an AirPlay receiver.',
       },
       {
@@ -307,9 +371,9 @@ function getCastStatus() {
         label: 'Windows / Android Miracast',
         status: !NATIVE_CAST_ENABLED ? 'disabled' : miracastAvailable ? (miracastConfigured ? miracastService : 'needs-link') : 'not-installed',
         discoverable: NATIVE_CAST_ENABLED && miracastAvailable && miracastConfigured && miracastService === 'active',
-        wall: false,
+        wall: miracastAvailable,
         note: miracastConfigured
-          ? 'Uses MiracleCast as the Wi-Fi Direct sink. Miracast can take over the Wi-Fi adapter while active.'
+          ? 'Uses MiracleCast as the Wi-Fi Direct sink. When available, the layout manager can mix it beside the Fluid browser wall.'
           : 'Set MIRACAST_LINK in /etc/fluid/fluid.env after running sudo miracle-sinkctl once to discover the link id.',
       },
       {
@@ -677,6 +741,23 @@ app.post('/api/cast/:service/:action', (req, res) => {
   const result = controlCastService(req.params.service, req.params.action);
   if (!result.ok) return res.status(400).json(result);
   res.json({ ...result, status: getCastStatus() });
+});
+
+app.get('/api/display-layout/status', (req, res) => {
+  if (req.query.pin !== ADMIN_PIN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  res.json(getDisplayLayoutStatus());
+});
+
+app.post('/api/display-layout/:mode', (req, res) => {
+  const pin = req.query.pin || req.body?.pin;
+  if (pin !== ADMIN_PIN) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  const result = setDisplayLayoutMode(req.params.mode);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result.status);
 });
 
 // Catch-all → serve index

@@ -24,7 +24,7 @@ NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/log/fluid
+ReadWritePaths=/var/log/fluid /var/lib/fluid
 CapabilityBoundingSet=
 
 # Logging

@@ -130,6 +130,20 @@
   .cast-card h3 { font-size: 13px; margin-bottom: 8px; }
   .cast-card p { color: var(--muted); font-size: 12px; line-height: 1.45; margin-top: 8px; }
   .cast-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+  .layout-control {
+    margin: 0 20px 16px;
+    padding: 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .layout-control-head {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .layout-control h3 { font-size: 13px; }
+  .layout-mode-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .layout-status { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
 
   /* ── Buttons ── */
   .btn {
@@ -331,7 +345,22 @@
         <div id="castGatewayPill" class="pill red">Disabled</div>
       </div>
       <div style="padding:14px 20px;color:var(--muted);font-size:12px;line-height:1.55">
-        Browser sharing stays as the stable multi-screen wall. Native AirPlay, Miracast, and Google Cast are OS-level receiver paths. Native sessions do not appear in the Connected Devices table; for iPhone, use Control Center Screen Mirroring rather than the media AirPlay button.
+        Browser sharing stays as the stable multi-screen wall. Native AirPlay and Miracast are OS-level receiver paths, then Fluid arranges those receiver windows with the browser wall on HDMI. Native sessions do not appear in the Connected Devices table; for iPhone, use Control Center Screen Mirroring rather than the media AirPlay button.
+      </div>
+      <div class="layout-control">
+        <div class="layout-control-head">
+          <h3>HDMI Layout</h3>
+          <div id="layoutPill" class="pill yellow">Unknown</div>
+        </div>
+        <div class="layout-mode-row">
+          <button class="btn btn-ghost" data-layout-mode="auto" onclick="setLayoutMode('auto')">Auto Mix</button>
+          <button class="btn btn-ghost" data-layout-mode="browser" onclick="setLayoutMode('browser')">Browser Wall</button>
+          <button class="btn btn-ghost" data-layout-mode="split" onclick="setLayoutMode('split')">Split View</button>
+          <button class="btn btn-ghost" data-layout-mode="native" onclick="setLayoutMode('native')">Native Focus</button>
+        </div>
+        <div class="layout-status" id="layoutStatus">
+          <span class="pill yellow">Waiting for display status</span>
+        </div>
       </div>
       <div class="cast-grid" id="castGrid"></div>
     </div>
@@ -363,6 +392,7 @@
 let ws = null, adminPin = null;
 let devices = [], activeDeviceIds = [];
 let castStatus = null;
+let layoutStatus = null;
 let renameTargetId = null;
 let reconnectDelay = 2000;
 
@@ -445,6 +475,7 @@ function handleMsg(msg) {
       updateServerInfo(msg.serverInfo);
       updateDisplayStatus(msg.displayOnline, msg.displayCount);
       fetchCastStatus();
+      fetchLayoutStatus();
       addLog(`Admin authenticated — ${devices.length} device(s) online`);
       break;
 
@@ -576,6 +607,10 @@ function renderCastStatus() {
 
   pill.className = 'pill ' + (castStatus.enabled ? 'green' : 'yellow');
   pill.textContent = castStatus.enabled ? `${castStatus.name} Enabled` : 'Disabled';
+  if (castStatus.displayLayout) {
+    layoutStatus = castStatus.displayLayout;
+    renderLayoutStatus();
+  }
   grid.innerHTML = (castStatus.protocols || []).map(p => `
     <div class="cast-card">
       <h3>${escHtml(p.label)}</h3>
@@ -594,6 +629,29 @@ function renderCastStatus() {
       ` : ''}
     </div>
   `).join('');
+}
+
+function renderLayoutStatus() {
+  const pill = $('layoutPill');
+  const status = $('layoutStatus');
+  const mode = layoutStatus?.configuredMode || 'unknown';
+  const effective = layoutStatus?.effectiveMode || 'unknown';
+  const nativeCount = Number(layoutStatus?.nativeWindows || 0);
+  const browserCount = Number(layoutStatus?.browserWindows || 0);
+
+  pill.className = 'pill ' + (layoutStatus?.available ? 'green' : 'yellow');
+  pill.textContent = `${mode} → ${effective}`;
+  document.querySelectorAll('[data-layout-mode]').forEach(btn => {
+    const active = btn.getAttribute('data-layout-mode') === mode;
+    btn.classList.toggle('active', active);
+    btn.classList.toggle('btn-accent', active);
+    btn.classList.toggle('btn-ghost', !active);
+  });
+  status.innerHTML = [
+    `<span class="pill ${browserCount ? 'green' : 'yellow'}">${browserCount} Browser Wall</span>`,
+    `<span class="pill ${nativeCount ? 'green' : 'yellow'}">${nativeCount} Native Window${nativeCount === 1 ? '' : 's'}</span>`,
+    `<span class="pill accent">Updated ${escHtml(layoutStatus?.updatedAt || 'pending')}</span>`,
+  ].join('');
 }
 
 // ── Actions ───────────────────────────────────────────────────────────────────
@@ -657,6 +715,7 @@ function fetchStats() {
     })
     .catch(() => {});
   fetchCastStatus();
+  fetchLayoutStatus();
 }
 
 function fetchCastStatus() {
@@ -669,6 +728,43 @@ function fetchCastStatus() {
       renderCastStatus();
     })
     .catch(() => {});
+}
+
+function fetchLayoutStatus() {
+  if (!adminPin) return;
+  fetch(`/api/display-layout/status?pin=${encodeURIComponent(adminPin)}`)
+    .then(r => r.ok ? r.json() : null)
+    .then(d => {
+      if (!d) return;
+      layoutStatus = d;
+      renderLayoutStatus();
+    })
+    .catch(() => {});
+}
+
+function setLayoutMode(mode) {
+  fetch(`/api/display-layout/${encodeURIComponent(mode)}?pin=${encodeURIComponent(adminPin)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin: adminPin }),
+  })
+    .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+    .then(({ ok, data }) => {
+      if (!ok) {
+        toast(data.error || 'Layout update failed');
+        addLog(data.error || 'Layout update failed', 'error');
+        return;
+      }
+      layoutStatus = data;
+      renderLayoutStatus();
+      toast(`Layout set to ${mode}`);
+      addLog(`HDMI layout set to ${mode}`);
+      fetchCastStatus();
+    })
+    .catch(() => {
+      toast('Layout update failed');
+      addLog('Layout update failed', 'error');
+    });
 }
 
 function controlCast(service, action) {

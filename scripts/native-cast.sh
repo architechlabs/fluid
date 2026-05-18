@@ -53,45 +53,27 @@ find_fluid_display_window() {
   find_visible_window_for_pid "$chromium_pid"
 }
 
-monitor_airplay_window() {
-  local uxplay_pid="$1"
-  local fluid_window=""
-  local cast_window=""
-  local cast_visible="false"
+layout_script() {
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  printf "%s/display-layout.sh\n" "$script_dir"
+}
 
-  have xdotool || return 0
+notify_layout_manager() {
+  local script
+  script="$(layout_script)"
+  [[ -x "$script" ]] || return 0
+  "$script" apply >/dev/null 2>&1 || true
+}
+
+monitor_airplay_layout() {
+  local uxplay_pid="$1"
 
   while kill -0 "$uxplay_pid" 2>/dev/null; do
-    cast_window="$(find_visible_window_for_pid "$uxplay_pid" || true)"
-    if [[ -n "$cast_window" ]]; then
-      fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
-      if [[ "$cast_visible" != "true" ]]; then
-        echo "AirPlay window detected on X11; moving Fluid display to the background."
-        [[ -n "$fluid_window" ]] && xdotool windowminimize "$fluid_window" 2>/dev/null || true
-        cast_visible="true"
-      fi
-      xdotool windowmap "$cast_window" 2>/dev/null || true
-      xdotool windowraise "$cast_window" 2>/dev/null || true
-      xdotool windowactivate "$cast_window" 2>/dev/null || true
-    elif [[ "$cast_visible" == "true" ]]; then
-      fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
-      if [[ -n "$fluid_window" ]]; then
-        echo "AirPlay window closed; restoring Fluid display."
-        xdotool windowmap "$fluid_window" 2>/dev/null || true
-        xdotool windowraise "$fluid_window" 2>/dev/null || true
-        xdotool windowactivate "$fluid_window" 2>/dev/null || true
-      fi
-      cast_visible="false"
-    fi
+    notify_layout_manager
     sleep 1
   done
-
-  fluid_window="${fluid_window:-$(find_fluid_display_window || true)}"
-  if [[ -n "$fluid_window" ]]; then
-    xdotool windowmap "$fluid_window" 2>/dev/null || true
-    xdotool windowraise "$fluid_window" 2>/dev/null || true
-    xdotool windowactivate "$fluid_window" 2>/dev/null || true
-  fi
+  notify_layout_manager
 }
 
 json_bool() {
@@ -233,7 +215,7 @@ run_airplay() {
 
   uxplay "${args[@]}" &
   uxplay_pid="$!"
-  monitor_airplay_window "$uxplay_pid" &
+  monitor_airplay_layout "$uxplay_pid" &
   monitor_pid="$!"
   trap 'kill "$monitor_pid" 2>/dev/null || true; kill "$uxplay_pid" 2>/dev/null || true' EXIT
   wait "$uxplay_pid"
