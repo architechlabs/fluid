@@ -231,6 +231,8 @@ apply_layout() {
     else
       effective="browser"
     fi
+  elif [[ "$mode" =~ ^(split|native)$ && $native_count -eq 0 ]]; then
+    effective="browser"
   fi
 
   case "$effective" in
