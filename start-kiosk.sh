@@ -11,13 +11,58 @@ xset -dpms
 
 # Keep the X desktop and Chromium viewport pinned to the active HDMI panel.
 # If KIOSK_WIDTH/HEIGHT are not configured, use the current X mode so 4K TVs
-# do not end up with a 1080p Chromium window stuck in the top-left corner.
+# do not end up with a tiny Chromium window stuck in the top-left corner.
+# Fluid defaults to a 1080p HDMI surface because Raspberry Pi browser decode and
+# repaint are much smoother at 60Hz than on many 4K TVs that expose only 30Hz.
 KIOSK_WIDTH="${KIOSK_WIDTH:-}"
 KIOSK_HEIGHT="${KIOSK_HEIGHT:-}"
+KIOSK_MAX_WIDTH="${KIOSK_MAX_WIDTH:-1920}"
+KIOSK_MAX_HEIGHT="${KIOSK_MAX_HEIGHT:-1080}"
+KIOSK_TARGET_REFRESH="${KIOSK_TARGET_REFRESH:-60}"
 if command -v xrandr >/dev/null 2>&1; then
   PRIMARY_OUTPUT="$(xrandr --query | awk '/ connected/{print $1; exit}')"
   if [ -n "$PRIMARY_OUTPUT" ]; then
-    xrandr --output "$PRIMARY_OUTPUT" --auto --pos 0x0 --scale 1x1 2>/dev/null || true
+    if [ -z "$KIOSK_WIDTH" ] || [ -z "$KIOSK_HEIGHT" ]; then
+      PREFERRED_MODE="$(xrandr --query | awk -v maxw="$KIOSK_MAX_WIDTH" -v maxh="$KIOSK_MAX_HEIGHT" -v target="$KIOSK_TARGET_REFRESH" '
+        $1 ~ /^[0-9]+x[0-9]+$/ {
+          split($1, size, "x")
+          width=size[1]+0
+          height=size[2]+0
+          if (width <= maxw && height <= maxh) {
+            for (i=2; i<=NF; i++) {
+              refresh=$i
+              gsub(/[+*]/, "", refresh)
+              hz=refresh+0
+              score=(width * height * 10000)
+              if (hz <= target) score += hz
+              else score -= (hz - target)
+              if (score > bestScore) {
+                bestScore=score
+                bestMode=$1
+                bestRefresh=refresh
+              }
+            }
+          }
+        }
+        END {
+          if (bestMode != "") printf "%s %s\n", bestMode, bestRefresh
+        }')"
+      if [ -n "$PREFERRED_MODE" ]; then
+        PREFERRED_SIZE="${PREFERRED_MODE%% *}"
+        PREFERRED_RATE="${PREFERRED_MODE#* }"
+        if [ "$PREFERRED_SIZE" != "$PREFERRED_RATE" ]; then
+          xrandr --output "$PRIMARY_OUTPUT" --mode "$PREFERRED_SIZE" --rate "$PREFERRED_RATE" --pos 0x0 --scale 1x1 2>/dev/null || \
+            xrandr --output "$PRIMARY_OUTPUT" --mode "$PREFERRED_SIZE" --pos 0x0 --scale 1x1 2>/dev/null || true
+        else
+          xrandr --output "$PRIMARY_OUTPUT" --mode "$PREFERRED_SIZE" --pos 0x0 --scale 1x1 2>/dev/null || true
+        fi
+      else
+        xrandr --output "$PRIMARY_OUTPUT" --auto --pos 0x0 --scale 1x1 2>/dev/null || true
+      fi
+    else
+      xrandr --output "$PRIMARY_OUTPUT" --mode "${KIOSK_WIDTH}x${KIOSK_HEIGHT}" --pos 0x0 --scale 1x1 2>/dev/null || \
+        xrandr --output "$PRIMARY_OUTPUT" --auto --pos 0x0 --scale 1x1 2>/dev/null || true
+    fi
   fi
   if [ -z "$KIOSK_WIDTH" ] || [ -z "$KIOSK_HEIGHT" ]; then
     CURRENT_MODE="$(xrandr --query | awk '/\*/{print $1; exit}')"

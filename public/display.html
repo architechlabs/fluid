@@ -82,6 +82,7 @@
     overflow: hidden;
     border: 1px solid rgba(148, 163, 184, 0.2);
     background: #000;
+    contain: strict;
   }
   .tile video {
     width: 100%;
@@ -91,6 +92,7 @@
     display: block;
     object-fit: contain;
     background: #000;
+    transform: translateZ(0);
   }
   .tile.waiting {
     display: flex;
@@ -114,6 +116,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     text-shadow: 0 1px 3px #000;
+    pointer-events: none;
   }
   .tile-label span {
     display: block;
@@ -357,6 +360,7 @@ async function initiateRtc(deviceId) {
     video.autoplay = true;
     video.playsInline = true;
     video.muted = true;
+    video.disablePictureInPicture = true;
     video.srcObject = ev.streams[0];
 
     const label = document.createElement('div');

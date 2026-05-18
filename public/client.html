@@ -187,6 +187,12 @@ const state = {
   stream: null, reconnectTimer: null,
   reconnectDelay: 2000, maxReconnect: 30000,
   sharing: false, registered: false, pendingStreamStart: false,
+  profile: {
+    maxWidth: 1920,
+    maxHeight: 1080,
+    maxFrameRate: 30,
+    maxBitrate: 5000000,
+  },
 };
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -376,7 +382,12 @@ async function startSharing() {
   try {
     setStatus('Requesting screen access…', '');
     const stream = await navigator.mediaDevices.getDisplayMedia({
-      video: { frameRate: { ideal: 30, max: 60 }, cursor: 'always' },
+      video: {
+        width: { ideal: state.profile.maxWidth, max: state.profile.maxWidth },
+        height: { ideal: state.profile.maxHeight, max: state.profile.maxHeight },
+        frameRate: { ideal: state.profile.maxFrameRate, max: state.profile.maxFrameRate },
+        cursor: 'always',
+      },
       audio: false,
     });
 
@@ -386,6 +397,16 @@ async function startSharing() {
 
     // Update stats
     const vt = stream.getVideoTracks()[0];
+    vt.contentHint = 'detail';
+    try {
+      await vt.applyConstraints({
+        width: { max: state.profile.maxWidth },
+        height: { max: state.profile.maxHeight },
+        frameRate: { max: state.profile.maxFrameRate },
+      });
+    } catch (constraintError) {
+      console.warn('Screen capture profile could not be fully applied:', constraintError);
+    }
     const settings = vt.getSettings();
     $('statRes').textContent = `${settings.width}×${settings.height}`;
     $('statFps').textContent = `${settings.frameRate || '—'} fps`;
@@ -428,7 +449,10 @@ async function handleOffer(offer, displayId) {
   state.pcs.set(displayId, pc);
 
   // Add tracks
-  state.stream.getTracks().forEach(t => pc.addTrack(t, state.stream));
+  state.stream.getTracks().forEach(t => {
+    const sender = pc.addTrack(t, state.stream);
+    if (t.kind === 'video') configureVideoSender(sender, t);
+  });
 
   // ICE candidates → server
   pc.addEventListener('icecandidate', ev => {
@@ -454,6 +478,30 @@ async function handleOffer(offer, displayId) {
   } catch (err) {
     console.warn('RTC answer failed:', err);
     closePeer(displayId);
+  }
+}
+
+async function configureVideoSender(sender, track) {
+  if (!sender?.getParameters) return;
+  const settings = track.getSettings?.() || {};
+  const largestSide = Math.max(settings.width || 0, settings.height || 0);
+  const scaleResolutionDownBy = largestSide > state.profile.maxWidth
+    ? Math.max(1, largestSide / state.profile.maxWidth)
+    : 1;
+
+  try {
+    const params = sender.getParameters();
+    params.degradationPreference = 'maintain-framerate';
+    params.encodings = params.encodings?.length ? params.encodings : [{}];
+    params.encodings[0] = {
+      ...params.encodings[0],
+      maxBitrate: state.profile.maxBitrate,
+      maxFramerate: state.profile.maxFrameRate,
+      scaleResolutionDownBy,
+    };
+    await sender.setParameters(params);
+  } catch (err) {
+    console.warn('Video sender profile could not be applied:', err);
   }
 }
 
