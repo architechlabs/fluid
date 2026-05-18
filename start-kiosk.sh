@@ -101,7 +101,7 @@ fi
 # Server URL - using localhost since display runs on the Pi by default
 SERVER_PORT="${SERVER_PORT:-3000}"
 SERVER_URL="${SERVER_URL:-http://localhost:${SERVER_PORT}/display.html}"
-CHROMIUM_LOCKED_KIOSK="${CHROMIUM_LOCKED_KIOSK:-false}"
+CHROMIUM_LOCKED_KIOSK="${CHROMIUM_LOCKED_KIOSK:-true}"
 
 CHROMIUM_BIN="${CHROMIUM_BIN:-}"
 if [ -z "$CHROMIUM_BIN" ]; then
@@ -122,7 +122,6 @@ fi
 
 exec "$CHROMIUM_BIN" \
   "${CHROMIUM_ARGS[@]}" \
-  --no-sandbox \
   --disable-infobars \
   --disable-session-crashed-bubble \
   --disable-restore-session-state \

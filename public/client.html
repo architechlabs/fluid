@@ -383,9 +383,9 @@ async function startSharing() {
     setStatus('Requesting screen access…', '');
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: {
-        width: { ideal: state.profile.maxWidth, max: state.profile.maxWidth },
-        height: { ideal: state.profile.maxHeight, max: state.profile.maxHeight },
-        frameRate: { ideal: state.profile.maxFrameRate, max: state.profile.maxFrameRate },
+        width: { ideal: state.profile.maxWidth },
+        height: { ideal: state.profile.maxHeight },
+        frameRate: { ideal: state.profile.maxFrameRate },
         cursor: 'always',
       },
       audio: false,
