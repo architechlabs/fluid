@@ -191,7 +191,7 @@ const state = {
     maxWidth: 1920,
     maxHeight: 1080,
     maxFrameRate: 30,
-    maxBitrate: 5000000,
+    maxBitrate: 6000000,
   },
 };
 
@@ -491,7 +491,7 @@ async function configureVideoSender(sender, track) {
 
   try {
     const params = sender.getParameters();
-    params.degradationPreference = 'maintain-framerate';
+    params.degradationPreference = 'maintain-resolution';
     params.encodings = params.encodings?.length ? params.encodings : [{}];
     params.encodings[0] = {
       ...params.encodings[0],

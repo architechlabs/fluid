@@ -22,7 +22,8 @@ MODE_FILE="${DISPLAY_LAYOUT_MODE_FILE:-${STATE_DIR}/display-layout.mode}"
 STATUS_FILE="${DISPLAY_LAYOUT_STATUS_FILE:-${STATE_DIR}/display-layout.status.json}"
 SIGNATURE_FILE="${DISPLAY_LAYOUT_SIGNATURE_FILE:-${STATE_DIR}/display-layout.signature}"
 DEFAULT_MODE="${DISPLAY_LAYOUT_MODE:-auto}"
-POLL_SECONDS="${DISPLAY_LAYOUT_POLL_SECONDS:-1}"
+POLL_SECONDS="${DISPLAY_LAYOUT_POLL_SECONDS:-10}"
+ACTIVE_POLL_SECONDS="${DISPLAY_LAYOUT_ACTIVE_POLL_SECONDS:-1}"
 MIN_NATIVE_WIDTH="${DISPLAY_LAYOUT_MIN_NATIVE_WIDTH:-360}"
 MIN_NATIVE_HEIGHT="${DISPLAY_LAYOUT_MIN_NATIVE_HEIGHT:-240}"
 
@@ -345,7 +346,14 @@ watch_layout() {
   valid_mode "$(read_mode)" || write_mode "auto"
   while true; do
     apply_layout || true
-    sleep "$POLL_SECONDS"
+    local effective native_count sleep_for
+    effective="$(awk -F\" '/"effectiveMode"/ {print $4; exit}' "$STATUS_FILE" 2>/dev/null || true)"
+    native_count="$(awk -F: '/"nativeWindows"/ {gsub(/[^0-9]/, "", $2); print $2; exit}' "$STATUS_FILE" 2>/dev/null || true)"
+    sleep_for="$POLL_SECONDS"
+    if [[ "$effective" =~ ^(split|native)$ || "${native_count:-0}" != "0" ]]; then
+      sleep_for="$ACTIVE_POLL_SECONDS"
+    fi
+    sleep "$sleep_for"
   done
 }
 

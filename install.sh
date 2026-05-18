@@ -444,6 +444,8 @@ FLUID_STATE_DIR=${STATE_DIR}
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
 DISPLAY_LAYOUT_MODE=auto
+DISPLAY_LAYOUT_POLL_SECONDS=10
+DISPLAY_LAYOUT_ACTIVE_POLL_SECONDS=1
 # Default HDMI render cap. 1080p60 is intentionally smoother on Raspberry Pi
 # than many TV-reported 4K modes, which are often only 30Hz.
 KIOSK_MAX_WIDTH=1920
