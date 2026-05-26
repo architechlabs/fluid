@@ -130,7 +130,7 @@ configure_named_tunnel() {
     ok "Cloudflare origin certificate already exists"
   fi
 
-  local tunnel_id credentials_src
+  local tunnel_id credentials_src credentials_dst
   tunnel_id="$(cloudflared tunnel list --output json 2>/dev/null | node -e '
 let data="";
 process.stdin.on("data", d => data += d);
@@ -162,14 +162,21 @@ process.stdin.on("end", () => {
     ok "Created tunnel ${tunnel_name} (${tunnel_id})"
   fi
 
-  credentials_src="/root/.cloudflared/${tunnel_id}.json"
-  [[ -f "$credentials_src" ]] || die "Tunnel credentials were not found at ${credentials_src}"
-  install -m 0600 "$credentials_src" "${CONFIG_DIR}/${tunnel_id}.json"
+  credentials_src=""
+  for candidate in "/root/.cloudflared/${tunnel_id}.json" "/root/.cloudflared/${tunnel_id}"; do
+    if [[ -f "$candidate" ]]; then
+      credentials_src="$candidate"
+      break
+    fi
+  done
+  [[ -n "$credentials_src" ]] || die "Tunnel credentials were not found at /root/.cloudflared/${tunnel_id}[.json]"
+  credentials_dst="${CONFIG_DIR}/${tunnel_id}.json"
+  install -m 0600 "$credentials_src" "$credentials_dst"
 
   step "Writing tunnel config"
   cat > "$CONFIG_FILE" <<EOF
 tunnel: ${tunnel_id}
-credentials-file: ${CONFIG_DIR}/${tunnel_id}.json
+credentials-file: ${credentials_dst}
 
 originRequest:
   noTLSVerify: true
@@ -192,6 +199,7 @@ EOF
   fi
 
   step "Installing service"
+  systemctl stop cloudflared.service >/dev/null 2>&1 || true
   write_service_for_named_tunnel
   ok "cloudflared service is running"
 }
