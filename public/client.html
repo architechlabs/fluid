@@ -187,8 +187,8 @@ const state = {
   stream: null, reconnectTimer: null,
   reconnectDelay: 2000, maxReconnect: 30000,
   sharing: false, registered: false, pendingStreamStart: false,
-  relayTimer: null, relayCanvas: null, relaySampleCanvas: null,
-  relayBusy: false, relayBlackFrames: 0,
+  relayTimer: null, relayCanvas: null,
+  relayBusy: false,
   profile: {
     maxWidth: 1920,
     maxHeight: 1080,
@@ -478,28 +478,7 @@ function stopFrameRelay() {
 function startFrameRelay() {
   if (!shouldUseFrameRelay() || !state.sharing || !state.stream || state.relayTimer) return;
   state.relayCanvas = state.relayCanvas || document.createElement('canvas');
-  state.relaySampleCanvas = state.relaySampleCanvas || document.createElement('canvas');
   relayFrameTick();
-}
-
-function isMostlyBlackRelayFrame(source) {
-  const sample = state.relaySampleCanvas || (state.relaySampleCanvas = document.createElement('canvas'));
-  const width = 64;
-  const height = 36;
-  if (sample.width !== width) sample.width = width;
-  if (sample.height !== height) sample.height = height;
-
-  const ctx = sample.getContext('2d', { alpha: false, willReadFrequently: true });
-  ctx.drawImage(source, 0, 0, width, height);
-
-  const pixels = ctx.getImageData(0, 0, width, height).data;
-  let black = 0;
-  const total = width * height;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const luma = (pixels[i] * 0.2126) + (pixels[i + 1] * 0.7152) + (pixels[i + 2] * 0.0722);
-    if (luma <= 4) black++;
-  }
-  return black / total >= 0.995;
 }
 
 function relayFrameTick() {
@@ -517,16 +496,6 @@ function relayFrameTick() {
 
   state.relayBusy = true;
   try {
-    if (isMostlyBlackRelayFrame(preview)) {
-      state.relayBlackFrames++;
-      if (state.relayBlackFrames === 12) {
-        console.warn('Tunnel frame relay is receiving black capture frames; keeping WebRTC video visible.');
-      }
-      state.relayBusy = false;
-      return;
-    }
-    state.relayBlackFrames = 0;
-
     const scale = Math.min(1, state.profile.relayWidth / preview.videoWidth);
     const width = Math.max(1, Math.round(preview.videoWidth * scale));
     const height = Math.max(1, Math.round(preview.videoHeight * scale));

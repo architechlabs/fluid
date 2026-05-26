@@ -95,9 +95,6 @@
     object-fit: contain;
     background: #000;
   }
-  .tile video.video-hidden {
-    opacity: 0;
-  }
   .relay-frame {
     position: absolute;
     inset: 0;
@@ -107,7 +104,7 @@
     object-fit: contain;
     background: #000;
   }
-  body.relay-priority .relay-frame {
+  .tile.use-relay .relay-frame {
     z-index: 2;
   }
   .tile.waiting {
@@ -205,6 +202,7 @@ const state = {
   retryTimers: new Map(),
   trackTimers: new Map(),
   relayTimers: new Map(),
+  videoFrameTimers: new Map(),
   reconcileTimer: null,
   rtcConfig: {
     iceServers: [
@@ -221,14 +219,7 @@ const connDot = document.getElementById('connDot');
 const connLabel = document.getElementById('connLabel');
 const liveCount = document.getElementById('liveCount');
 const relayHeaderDecoder = new TextDecoder();
-
-function isPublicHostname(hostname = location.hostname) {
-  return !/^(localhost|127\.0\.0\.1|::1)$/.test(hostname)
-    && !/^(10\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(hostname)
-    && !hostname.endsWith('.local');
-}
-
-document.body.classList.toggle('relay-priority', isPublicHostname());
+const displayMode = new URLSearchParams(location.search).get('mode') || 'auto';
 
 function setConnStatus(ok, label) {
   connDot.className = 'd' + (ok ? ' ok' : '');
@@ -323,6 +314,8 @@ function renderRelayFrame(deviceId, device, frame) {
   mergeDevice({ ...knownDevice, status: 'streaming' });
   const tile = ensureTile(knownDevice);
   tile.classList.remove('waiting');
+  tile.classList.add('has-relay');
+  if (displayMode === 'relay' || !tile.querySelector('video')) tile.classList.add('use-relay');
   tile.querySelectorAll(':scope > div:not(.tile-label)').forEach(el => el.remove());
 
   let img = tile.querySelector('.relay-frame');
@@ -341,9 +334,11 @@ function renderRelayFrame(deviceId, device, frame) {
 
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.set(deviceId, setTimeout(() => {
-    const staleImg = document.getElementById(tileId(deviceId))?.querySelector('.relay-frame');
+    const staleTile = document.getElementById(tileId(deviceId));
+    const staleImg = staleTile?.querySelector('.relay-frame');
     if (staleImg?.dataset.objectUrl) URL.revokeObjectURL(staleImg.dataset.objectUrl);
     if (staleImg) staleImg.remove();
+    staleTile?.classList.remove('has-relay', 'use-relay');
   }, 2500));
 
   setGrid(getStreamingDevices().length);
@@ -382,6 +377,8 @@ function closePeer(deviceId) {
   state.trackTimers.delete(deviceId);
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.delete(deviceId);
+  clearTimeout(state.videoFrameTimers.get(deviceId));
+  state.videoFrameTimers.delete(deviceId);
   const tile = document.getElementById(tileId(deviceId));
   const img = tile?.querySelector('.relay-frame');
   if (img?.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
@@ -396,6 +393,25 @@ function resetPeer(deviceId) {
   state.pcs.delete(deviceId);
   clearTimeout(state.trackTimers.get(deviceId));
   state.trackTimers.delete(deviceId);
+  clearTimeout(state.videoFrameTimers.get(deviceId));
+  state.videoFrameTimers.delete(deviceId);
+}
+
+function markRelayFallback(deviceId, delay = 3200) {
+  if (displayMode === 'webrtc') return;
+  clearTimeout(state.videoFrameTimers.get(deviceId));
+  const timer = setTimeout(() => {
+    const tile = document.getElementById(tileId(deviceId));
+    if (tile?.classList.contains('has-relay')) tile.classList.add('use-relay');
+  }, delay);
+  state.videoFrameTimers.set(deviceId, timer);
+}
+
+function markWebRtcVisible(deviceId) {
+  if (displayMode === 'relay') return;
+  clearTimeout(state.videoFrameTimers.get(deviceId));
+  state.videoFrameTimers.delete(deviceId);
+  document.getElementById(tileId(deviceId))?.classList.remove('use-relay');
 }
 
 function scheduleRetry(deviceId, delay = 1200) {
@@ -449,12 +465,18 @@ async function initiateRtc(deviceId) {
     video.disablePictureInPicture = true;
     video.srcObject = ev.streams[0];
     video.addEventListener('loadedmetadata', () => video.play().catch(() => {}), { once: true });
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(() => markWebRtcVisible(deviceId));
+    } else {
+      video.addEventListener('playing', () => markWebRtcVisible(deviceId), { once: true });
+    }
 
     const label = document.createElement('div');
     label.className = 'tile-label';
     label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
 
     tile.append(video, label);
+    markRelayFallback(deviceId);
   });
 
   pc.addEventListener('icecandidate', ev => {
@@ -467,6 +489,7 @@ async function initiateRtc(deviceId) {
     if (pc.connectionState === 'connected') {
       clearTimeout(state.retryTimers.get(deviceId));
       state.retryTimers.delete(deviceId);
+      markRelayFallback(deviceId, 2200);
     }
     if (['failed', 'disconnected'].includes(pc.connectionState)) {
       resetPeer(deviceId);
@@ -482,6 +505,7 @@ async function initiateRtc(deviceId) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     send({ type: 'rtc-offer', offer: pc.localDescription, targetDeviceId: deviceId });
+    markRelayFallback(deviceId);
     const trackTimer = setTimeout(() => {
       const tile = document.getElementById(tileId(deviceId));
       const stillStreaming = state.devices.some(d => d.id === deviceId && d.status === 'streaming');
@@ -602,6 +626,7 @@ async function handleMessage(msg) {
         const img = document.getElementById(tileId(msg.deviceId))?.querySelector('.relay-frame');
         if (img?.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
         img?.remove();
+        document.getElementById(tileId(msg.deviceId))?.classList.remove('has-relay', 'use-relay');
       }
       break;
 
