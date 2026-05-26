@@ -129,7 +129,11 @@ exec "$CHROMIUM_BIN" \
   --disable-background-timer-throttling \
   --disable-renderer-backgrounding \
   --disable-backgrounding-occluded-windows \
-  --disable-features=TranslateUI \
+  --disable-gpu-rasterization \
+  --disable-zero-copy \
+  --disable-gpu-memory-buffer-video-frames \
+  --disable-accelerated-video-decode \
+  --disable-features=TranslateUI,VaapiVideoDecoder,UseChromeOSDirectVideoDecoder,DirectVideoDecoder,HardwareMediaKeyHandling \
   --no-first-run \
   --fast \
   --fast-start \
