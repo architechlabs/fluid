@@ -194,9 +194,9 @@ const state = {
     maxHeight: 1080,
     maxFrameRate: 30,
     maxBitrate: 6000000,
-    relayWidth: 960,
-    relayFrameRate: 6,
-    relayQuality: 0.52,
+    relayWidth: 720,
+    relayFrameRate: 8,
+    relayQuality: 0.48,
   },
   rtcConfig: {
     iceServers: [
@@ -512,6 +512,7 @@ function relayFrameTick() {
   const delay = Math.max(120, Math.round(1000 / state.profile.relayFrameRate));
   state.relayTimer = setTimeout(relayFrameTick, delay);
   if (state.relayBusy || state.ws?.readyState !== WebSocket.OPEN) return;
+  if (state.ws.bufferedAmount > 1024 * 1024) return;
   if (!preview.videoWidth || !preview.videoHeight) return;
 
   state.relayBusy = true;
@@ -521,6 +522,7 @@ function relayFrameTick() {
       if (state.relayBlackFrames === 12) {
         console.warn('Tunnel frame relay is receiving black capture frames; keeping WebRTC video visible.');
       }
+      state.relayBusy = false;
       return;
     }
     state.relayBlackFrames = 0;
@@ -533,18 +535,28 @@ function relayFrameTick() {
     if (canvas.height !== height) canvas.height = height;
     const ctx = canvas.getContext('2d', { alpha: false });
     ctx.drawImage(preview, 0, 0, width, height);
-    send({
-      type: 'relay-frame',
-      frame: {
-        dataUrl: canvas.toDataURL('image/jpeg', state.profile.relayQuality),
-        width,
-        height,
-        sentAt: new Date().toISOString(),
-      },
-    });
+    canvas.toBlob(blob => {
+      try {
+        if (!blob || state.ws?.readyState !== WebSocket.OPEN || state.ws.bufferedAmount > 1024 * 1024) return;
+        const header = JSON.stringify({
+          type: 'relay-frame-binary',
+          frame: {
+            width,
+            height,
+            mime: blob.type || 'image/jpeg',
+            sentAt: new Date().toISOString(),
+          },
+        });
+        state.ws.send(new Blob([header, '\n\n', blob], { type: 'application/octet-stream' }));
+      } catch (error) {
+        console.warn('Frame relay send failed:', error);
+      } finally {
+        state.relayBusy = false;
+      }
+    }, 'image/jpeg', state.profile.relayQuality);
+    return;
   } catch (error) {
     console.warn('Frame relay failed:', error);
-  } finally {
     state.relayBusy = false;
   }
 }

@@ -205,8 +205,6 @@ const state = {
   retryTimers: new Map(),
   trackTimers: new Map(),
   relayTimers: new Map(),
-  videoHealthTimers: new Map(),
-  videoSampleCanvas: null,
   reconcileTimer: null,
   rtcConfig: {
     iceServers: [
@@ -222,6 +220,7 @@ const serverUrl = document.getElementById('serverUrl');
 const connDot = document.getElementById('connDot');
 const connLabel = document.getElementById('connLabel');
 const liveCount = document.getElementById('liveCount');
+const relayHeaderDecoder = new TextDecoder();
 
 function isPublicHostname(hostname = location.hostname) {
   return !/^(localhost|127\.0\.0\.1|::1)$/.test(hostname)
@@ -314,7 +313,7 @@ function renderTileLabel(tile, device) {
 }
 
 function renderRelayFrame(deviceId, device, frame) {
-  if (!deviceId || !frame?.dataUrl) return;
+  if (!deviceId || (!frame?.dataUrl && !frame?.blobUrl)) return;
   const knownDevice = device || state.devices.find(d => d.id === deviceId) || {
     id: deviceId,
     name: `Device ${String(deviceId).slice(0, 8)}`,
@@ -333,16 +332,17 @@ function renderRelayFrame(deviceId, device, frame) {
     img.alt = '';
     tile.prepend(img);
   }
-  img.src = frame.dataUrl;
+  if (img.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+  img.src = frame.blobUrl || frame.dataUrl;
+  img.dataset.objectUrl = frame.blobUrl || '';
   img.style.display = 'block';
   img.style.opacity = '1';
-  const video = tile.querySelector('video');
-  if (video?.dataset.videoBlack === 'true') video.classList.add('video-hidden');
   renderTileLabel(tile, knownDevice);
 
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.set(deviceId, setTimeout(() => {
     const staleImg = document.getElementById(tileId(deviceId))?.querySelector('.relay-frame');
+    if (staleImg?.dataset.objectUrl) URL.revokeObjectURL(staleImg.dataset.objectUrl);
     if (staleImg) staleImg.remove();
   }, 2500));
 
@@ -382,9 +382,10 @@ function closePeer(deviceId) {
   state.trackTimers.delete(deviceId);
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.delete(deviceId);
-  clearInterval(state.videoHealthTimers.get(deviceId));
-  state.videoHealthTimers.delete(deviceId);
-  document.getElementById(tileId(deviceId))?.remove();
+  const tile = document.getElementById(tileId(deviceId));
+  const img = tile?.querySelector('.relay-frame');
+  if (img?.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+  tile?.remove();
   setGrid(getStreamingDevices().length);
   updateStandby();
 }
@@ -395,70 +396,6 @@ function resetPeer(deviceId) {
   state.pcs.delete(deviceId);
   clearTimeout(state.trackTimers.get(deviceId));
   state.trackTimers.delete(deviceId);
-  clearInterval(state.videoHealthTimers.get(deviceId));
-  state.videoHealthTimers.delete(deviceId);
-}
-
-function isMostlyBlackVideoFrame(video) {
-  if (!video.videoWidth || !video.videoHeight || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
-
-  const canvas = state.videoSampleCanvas || (state.videoSampleCanvas = document.createElement('canvas'));
-  const width = 64;
-  const height = 36;
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-
-  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
-  ctx.drawImage(video, 0, 0, width, height);
-  const pixels = ctx.getImageData(0, 0, width, height).data;
-  let black = 0;
-  const total = width * height;
-  for (let i = 0; i < pixels.length; i += 4) {
-    const luma = (pixels[i] * 0.2126) + (pixels[i + 1] * 0.7152) + (pixels[i + 2] * 0.0722);
-    if (luma <= 5) black++;
-  }
-  return black / total >= 0.992;
-}
-
-function monitorVideoHealth(deviceId, video) {
-  clearInterval(state.videoHealthTimers.get(deviceId));
-  let blackSamples = 0;
-  let goodSamples = 0;
-
-  const timer = setInterval(() => {
-    const tile = document.getElementById(tileId(deviceId));
-    if (!tile || !video.isConnected) {
-      clearInterval(timer);
-      state.videoHealthTimers.delete(deviceId);
-      return;
-    }
-
-    let isBlack = false;
-    try {
-      isBlack = isMostlyBlackVideoFrame(video);
-    } catch (error) {
-      return;
-    }
-
-    if (isBlack) {
-      blackSamples++;
-      goodSamples = 0;
-    } else {
-      goodSamples++;
-      blackSamples = 0;
-    }
-
-    if (blackSamples >= 6 && tile.querySelector('.relay-frame')) {
-      video.dataset.videoBlack = 'true';
-      video.classList.add('video-hidden');
-    }
-    if (goodSamples >= 2) {
-      video.dataset.videoBlack = 'false';
-      video.classList.remove('video-hidden');
-    }
-  }, 350);
-
-  state.videoHealthTimers.set(deviceId, timer);
 }
 
 function scheduleRetry(deviceId, delay = 1200) {
@@ -518,7 +455,6 @@ async function initiateRtc(deviceId) {
     label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
 
     tile.append(video, label);
-    monitorVideoHealth(deviceId, video);
   });
 
   pc.addEventListener('icecandidate', ev => {
@@ -565,6 +501,7 @@ async function initiateRtc(deviceId) {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
   state.ws = ws;
 
   ws.addEventListener('open', () => {
@@ -574,6 +511,10 @@ function connect() {
   });
 
   ws.addEventListener('message', ev => {
+    if (ev.data instanceof ArrayBuffer) {
+      handleBinaryMessage(ev.data);
+      return;
+    }
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     handleMessage(msg);
@@ -588,6 +529,32 @@ function connect() {
 
 function send(data) {
   if (state.ws?.readyState === WebSocket.OPEN) state.ws.send(JSON.stringify(data));
+}
+
+function parseRelayPacket(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const limit = Math.min(bytes.length - 1, 8192);
+  for (let i = 0; i < limit; i++) {
+    if (bytes[i] === 10 && bytes[i + 1] === 10) {
+      const header = JSON.parse(relayHeaderDecoder.decode(bytes.subarray(0, i)));
+      return {
+        header,
+        blob: new Blob([buffer.slice(i + 2)], { type: header.frame?.mime || 'image/jpeg' }),
+      };
+    }
+  }
+  return null;
+}
+
+function handleBinaryMessage(buffer) {
+  let packet;
+  try { packet = parseRelayPacket(buffer); }
+  catch (error) { console.warn('Bad relay packet', error); return; }
+  if (!packet || packet.header?.type !== 'relay-frame-binary') return;
+  renderRelayFrame(packet.header.deviceId, packet.header.device, {
+    ...packet.header.frame,
+    blobUrl: URL.createObjectURL(packet.blob),
+  });
 }
 
 async function handleMessage(msg) {
@@ -631,10 +598,17 @@ async function handleMessage(msg) {
     case 'relay-ended':
       clearTimeout(state.relayTimers.get(msg.deviceId));
       state.relayTimers.delete(msg.deviceId);
-      document.getElementById(tileId(msg.deviceId))?.querySelector('.relay-frame')?.remove();
+      {
+        const img = document.getElementById(tileId(msg.deviceId))?.querySelector('.relay-frame');
+        if (img?.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+        img?.remove();
+      }
       break;
 
     case 'clear-display':
+      wall.querySelectorAll('.relay-frame').forEach(img => {
+        if (img.dataset.objectUrl) URL.revokeObjectURL(img.dataset.objectUrl);
+      });
       for (const id of [...state.pcs.keys()]) closePeer(id);
       wall.innerHTML = '';
       break;

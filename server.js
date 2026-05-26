@@ -482,7 +482,11 @@ wss.on('connection', (ws, req) => {
   // Heartbeat pong
   ws.on('pong', () => { ws.isAlive = true; });
 
-  ws.on('message', raw => {
+  ws.on('message', (raw, isBinary) => {
+    if (isBinary) {
+      handleBinaryMessage(ws, raw);
+      return;
+    }
     let data;
     try { data = JSON.parse(raw); }
     catch { logger.warn(`Bad JSON from ${clientId}`); return; }
@@ -524,6 +528,62 @@ const wallSyncInterval = setInterval(() => {
 }, 5000);
 
 wss.on('close', () => clearInterval(wallSyncInterval));
+
+function splitRelayPacket(raw) {
+  const packet = Buffer.isBuffer(raw) ? raw : Buffer.from(raw);
+  const maxHeader = Math.min(packet.length - 1, 8192);
+  for (let i = 0; i < maxHeader; i++) {
+    if (packet[i] === 10 && packet[i + 1] === 10) {
+      const header = JSON.parse(packet.subarray(0, i).toString('utf8'));
+      return { header, payload: packet.subarray(i + 2) };
+    }
+  }
+  return null;
+}
+
+function makeRelayPacket(header, payload) {
+  return Buffer.concat([
+    Buffer.from(`${JSON.stringify(header)}\n\n`, 'utf8'),
+    Buffer.isBuffer(payload) ? payload : Buffer.from(payload),
+  ]);
+}
+
+function broadcastDisplayBinary(packet) {
+  displaySockets.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) ws.send(packet, { binary: true });
+  });
+}
+
+function handleBinaryMessage(ws, raw) {
+  if (ws.role !== 'client' || !ws.deviceId) return;
+  const dev = devices.get(ws.deviceId);
+  if (!dev || dev.status !== 'streaming') return;
+
+  let packet;
+  try { packet = splitRelayPacket(raw); }
+  catch (error) {
+    logger.warn(`Bad binary relay packet from ${ws.deviceId}: ${error.message}`);
+    return;
+  }
+  if (!packet || packet.header?.type !== 'relay-frame-binary' || packet.payload.length < 256) return;
+  if (packet.payload.length > 512 * 1024) {
+    logger.warn(`Relay frame too large from ${ws.deviceId}: ${packet.payload.length} bytes`);
+    return;
+  }
+
+  broadcastDisplayBinary(makeRelayPacket({
+    type: 'relay-frame-binary',
+    deviceId: ws.deviceId,
+    device: serializeDevice(ws.deviceId),
+    frame: {
+      width: Number(packet.header.frame?.width) || 0,
+      height: Number(packet.header.frame?.height) || 0,
+      sentAt: packet.header.frame?.sentAt || timestamp(),
+      mime: packet.header.frame?.mime || 'image/jpeg',
+      bytes: packet.payload.length,
+    },
+  }, packet.payload));
+}
 
 // ─── Message Router ───────────────────────────────────────────────────────────
 function handleMessage(ws, data) {
