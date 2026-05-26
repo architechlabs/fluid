@@ -93,6 +93,15 @@
     object-fit: contain;
     background: #000;
   }
+  .relay-frame {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
   .tile.waiting {
     display: flex;
     align-items: center;
@@ -116,6 +125,7 @@
     text-overflow: ellipsis;
     text-shadow: 0 1px 3px #000;
     pointer-events: none;
+    z-index: 2;
   }
   .tile-label span {
     display: block;
@@ -186,6 +196,7 @@ const state = {
   pcs: new Map(),
   retryTimers: new Map(),
   trackTimers: new Map(),
+  relayTimers: new Map(),
   reconcileTimer: null,
   rtcConfig: {
     iceServers: [
@@ -274,6 +285,49 @@ function ensureTile(device) {
   return tile;
 }
 
+function renderTileLabel(tile, device) {
+  let label = tile.querySelector('.tile-label');
+  if (!label) {
+    label = document.createElement('div');
+    label.className = 'tile-label';
+    tile.appendChild(label);
+  }
+  label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
+}
+
+function renderRelayFrame(deviceId, device, frame) {
+  if (!deviceId || !frame?.dataUrl) return;
+  const knownDevice = device || state.devices.find(d => d.id === deviceId) || {
+    id: deviceId,
+    name: `Device ${String(deviceId).slice(0, 8)}`,
+    platform: 'Tunnel Relay',
+    status: 'streaming',
+  };
+  mergeDevice({ ...knownDevice, status: 'streaming' });
+  const tile = ensureTile(knownDevice);
+  tile.classList.remove('waiting');
+
+  let img = tile.querySelector('.relay-frame');
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'relay-frame';
+    img.alt = '';
+    tile.prepend(img);
+  }
+  img.src = frame.dataUrl;
+  img.style.opacity = '1';
+  renderTileLabel(tile, knownDevice);
+
+  clearTimeout(state.relayTimers.get(deviceId));
+  state.relayTimers.set(deviceId, setTimeout(() => {
+    const staleImg = document.getElementById(tileId(deviceId))?.querySelector('.relay-frame');
+    if (staleImg) staleImg.style.opacity = '0.55';
+  }, 2500));
+
+  setGrid(getStreamingDevices().length);
+  updateStandby();
+}
+
 function renderWall() {
   const streaming = getStreamingDevices();
   const streamingIds = new Set(streaming.map(d => d.id));
@@ -284,8 +338,7 @@ function renderWall() {
 
   for (const device of streaming) {
     const tile = ensureTile(device);
-    const label = tile.querySelector('.tile-label');
-    if (label) label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
+    renderTileLabel(tile, device);
     if (!state.pcs.has(device.id)) initiateRtc(device.id);
   }
 
@@ -305,6 +358,8 @@ function closePeer(deviceId) {
   state.retryTimers.delete(deviceId);
   clearTimeout(state.trackTimers.get(deviceId));
   state.trackTimers.delete(deviceId);
+  clearTimeout(state.relayTimers.get(deviceId));
+  state.relayTimers.delete(deviceId);
   document.getElementById(tileId(deviceId))?.remove();
   setGrid(getStreamingDevices().length);
   updateStandby();
@@ -373,7 +428,7 @@ async function initiateRtc(deviceId) {
     label.className = 'tile-label';
     label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
 
-    tile.append(video, label);
+  tile.append(video, label);
   });
 
   pc.addEventListener('icecandidate', ev => {
@@ -476,6 +531,16 @@ async function handleMessage(msg) {
 
     case 'stream-ended':
       closePeer(msg.deviceId);
+      break;
+
+    case 'relay-frame':
+      if (msg.device && msg.deviceId) mergeDevice(msg.device);
+      renderRelayFrame(msg.deviceId, msg.device, msg.frame);
+      break;
+
+    case 'relay-ended':
+      clearTimeout(state.relayTimers.get(msg.deviceId));
+      state.relayTimers.delete(msg.deviceId);
       break;
 
     case 'clear-display':

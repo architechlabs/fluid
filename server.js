@@ -722,6 +722,30 @@ function handleMessage(ws, data) {
       break;
     }
 
+    case 'relay-frame': {
+      if (ws.role !== 'client' || !ws.deviceId || !data.frame?.dataUrl) return;
+      const dev = devices.get(ws.deviceId);
+      if (!dev || dev.status !== 'streaming') return;
+      broadcastDisplay({
+        type: 'relay-frame',
+        deviceId: ws.deviceId,
+        device: serializeDevice(ws.deviceId),
+        frame: {
+          dataUrl: String(data.frame.dataUrl),
+          width: Number(data.frame.width) || 0,
+          height: Number(data.frame.height) || 0,
+          sentAt: data.frame.sentAt || timestamp(),
+        },
+      });
+      break;
+    }
+
+    case 'relay-ended': {
+      if (ws.role !== 'client' || !ws.deviceId) return;
+      broadcastDisplay({ type: 'relay-ended', deviceId: ws.deviceId });
+      break;
+    }
+
     default:
       logger.warn(`Unknown message type "${data.type}" from ${ws.role}`);
   }

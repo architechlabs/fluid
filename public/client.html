@@ -187,11 +187,15 @@ const state = {
   stream: null, reconnectTimer: null,
   reconnectDelay: 2000, maxReconnect: 30000,
   sharing: false, registered: false, pendingStreamStart: false,
+  relayTimer: null, relayCanvas: null, relayBusy: false,
   profile: {
     maxWidth: 1920,
     maxHeight: 1080,
     maxFrameRate: 30,
     maxBitrate: 6000000,
+    relayWidth: 1280,
+    relayFrameRate: 8,
+    relayQuality: 0.62,
   },
   rtcConfig: {
     iceServers: [
@@ -243,6 +247,19 @@ function detectPlatform() {
 function secureShareUrl() {
   const port = location.port && !['80', '443'].includes(location.port) ? `:${location.port}` : '';
   return `https://${location.hostname}${port}/client.html`;
+}
+
+function isPublicHostname(hostname = location.hostname) {
+  return !/^(localhost|127\.0\.0\.1|::1)$/.test(hostname)
+    && !/^(10\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(hostname)
+    && !hostname.endsWith('.local');
+}
+
+function shouldUseFrameRelay() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('relay') === '0') return false;
+  if (params.get('relay') === '1') return true;
+  return isPublicHostname();
 }
 
 function getShareBlockReason() {
@@ -343,6 +360,7 @@ async function handleMessage(msg) {
           state.pendingStreamStart = false;
           send({ type: 'stream-started' });
         }
+        startFrameRelay();
       }
       break;
 
@@ -437,6 +455,7 @@ async function startSharing() {
     // If display sends an offer, createPeerConnection will be called
     // Handle stream end by user (browser stop-share button)
     vt.addEventListener('ended', () => stopSharing());
+    startFrameRelay();
 
   } catch (err) {
     if (err.name === 'NotAllowedError') {
@@ -445,6 +464,57 @@ async function startSharing() {
       showAlert(alertErr, `Error: ${err.message}`);
     }
     setStatus('Ready', 'connected');
+  }
+}
+
+function stopFrameRelay() {
+  clearTimeout(state.relayTimer);
+  state.relayTimer = null;
+  state.relayBusy = false;
+  send({ type: 'relay-ended' });
+}
+
+function startFrameRelay() {
+  if (!shouldUseFrameRelay() || !state.sharing || !state.stream || state.relayTimer) return;
+  state.relayCanvas = state.relayCanvas || document.createElement('canvas');
+  relayFrameTick();
+}
+
+function relayFrameTick() {
+  clearTimeout(state.relayTimer);
+  if (!shouldUseFrameRelay() || !state.sharing || !state.stream) {
+    stopFrameRelay();
+    return;
+  }
+
+  const delay = Math.max(120, Math.round(1000 / state.profile.relayFrameRate));
+  state.relayTimer = setTimeout(relayFrameTick, delay);
+  if (state.relayBusy || state.ws?.readyState !== WebSocket.OPEN) return;
+  if (!preview.videoWidth || !preview.videoHeight) return;
+
+  state.relayBusy = true;
+  try {
+    const scale = Math.min(1, state.profile.relayWidth / preview.videoWidth);
+    const width = Math.max(1, Math.round(preview.videoWidth * scale));
+    const height = Math.max(1, Math.round(preview.videoHeight * scale));
+    const canvas = state.relayCanvas;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    ctx.drawImage(preview, 0, 0, width, height);
+    send({
+      type: 'relay-frame',
+      frame: {
+        dataUrl: canvas.toDataURL('image/jpeg', state.profile.relayQuality),
+        width,
+        height,
+        sentAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.warn('Frame relay failed:', error);
+  } finally {
+    state.relayBusy = false;
   }
 }
 
@@ -531,6 +601,7 @@ function stopSharing() {
     state.stream.getTracks().forEach(t => t.stop());
     state.stream = null;
   }
+  stopFrameRelay();
   closeAllPeers();
   preview.srcObject = null;
   send({ type: 'stream-stopped' });
