@@ -103,69 +103,6 @@ validate_public_url() {
   warn "DNS/Cloudflare propagation can take a little while. Check: journalctl -u cloudflared -f"
 }
 
-read_fluid_env_value() {
-  local key="$1"
-  [[ -f "$FLUID_ENV" ]] || return 0
-  awk -F= -v key="$key" '$1 == key {print substr($0, length(key) + 2); exit}' "$FLUID_ENV" 2>/dev/null || true
-}
-
-set_fluid_env_value() {
-  local key="$1" value="$2" tmp
-  [[ -f "$FLUID_ENV" ]] || die "${FLUID_ENV} was not found. Run the Fluid installer first."
-  tmp="$(mktemp)"
-  awk -v key="$key" -v value="$value" '
-    BEGIN { written = 0 }
-    $0 ~ "^" key "=" {
-      print key "=" value
-      written = 1
-      next
-    }
-    { print }
-    END {
-      if (!written) print key "=" value
-    }
-  ' "$FLUID_ENV" > "$tmp"
-  install -m 0640 -o root -g fluid "$tmp" "$FLUID_ENV" 2>/dev/null || install -m 0640 "$tmp" "$FLUID_ENV"
-  rm -f "$tmp"
-}
-
-configure_turn_for_tunnel() {
-  local existing_urls answer urls username credential policy
-  existing_urls="$(read_fluid_env_value RTC_TURN_URLS)"
-  if [[ -n "$existing_urls" ]]; then
-    ok "TURN relay already configured for WebRTC: ${existing_urls}"
-    return 0
-  fi
-
-  printf "\n"
-  warn "Cloudflare Tunnel proxies the Fluid website and WebSocket signaling."
-  warn "Remote browser sharing also needs a TURN relay for the WebRTC video path."
-  read -r -p "Configure TURN relay now? [y/N]: " answer
-  [[ "${answer,,}" == "y" ]] || {
-    warn "Skipping TURN. Local sharing will work; off-LAN tunnel sharing may connect but show black video."
-    return 0
-  }
-
-  read -r -p "TURN URLs, comma-separated (example: turn:turn.example.com:3478,turns:turn.example.com:5349): " urls
-  [[ -n "$urls" ]] || die "TURN URLs cannot be empty when configuring TURN."
-  read -r -p "TURN username: " username
-  read -r -s -p "TURN credential/password: " credential
-  printf "\n"
-  read -r -p "ICE transport policy [all]: " policy
-  policy="${policy:-all}"
-  [[ "$policy" =~ ^(all|relay)$ ]] || die "ICE transport policy must be all or relay."
-
-  set_fluid_env_value RTC_INCLUDE_DEFAULT_STUN true
-  set_fluid_env_value RTC_TURN_URLS "$urls"
-  set_fluid_env_value RTC_TURN_USERNAME "$username"
-  set_fluid_env_value RTC_TURN_CREDENTIAL "$credential"
-  set_fluid_env_value RTC_ICE_TRANSPORT_POLICY "$policy"
-
-  systemctl restart fluid-server.service
-  systemctl restart fluid-display.service >/dev/null 2>&1 || true
-  ok "TURN relay saved to ${FLUID_ENV} and Fluid services restarted"
-}
-
 find_tunnel_id() {
   local tunnel_name="$1"
   cloudflared tunnel list 2>/dev/null | awk -v name="$tunnel_name" '
@@ -291,7 +228,6 @@ main() {
   fi
 
   validate_public_url "$hostname"
-  configure_turn_for_tunnel
 
   printf "\n%bDone.%b\n" "$bold$green" "$nc"
   printf "Public URL: https://%s\n" "$hostname"

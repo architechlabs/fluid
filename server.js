@@ -106,12 +106,17 @@ app.use((req, res, next) => {
     return next();
   }
 
-  const host = String(req.headers.host || '').replace(/:\d+$/, '');
+  const hostHeader = String(req.headers['x-forwarded-host'] || req.headers.host || '');
+  const host = hostHeader.replace(/:\d+$/, '');
   const localHost = ['localhost', '127.0.0.1', '::1'].includes(host);
   if (!host || localHost || req.path.startsWith('/api/health')) return next();
 
-  const port = SERVER_PORT === 443 ? '' : `:${SERVER_PORT}`;
-  return res.redirect(308, `https://${host}${port}${req.originalUrl}`);
+  const privateIp = /^(10\.|127\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(host);
+  const localName = host.endsWith('.local') || !host.includes('.');
+  const port = hostHeader.includes(':') || SERVER_PORT === 443 || (!privateIp && !localName)
+    ? ''
+    : `:${SERVER_PORT}`;
+  return res.redirect(308, `https://${hostHeader.replace(/:\d+$/, '')}${port}${req.originalUrl}`);
 });
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
