@@ -193,6 +193,12 @@ const state = {
     maxFrameRate: 30,
     maxBitrate: 6000000,
   },
+  rtcConfig: {
+    iceServers: [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    ],
+    iceTransportPolicy: 'all',
+  },
 };
 
 // ─── DOM refs ─────────────────────────────────────────────────────────────────
@@ -260,6 +266,12 @@ function updateShareAvailability() {
   return true;
 }
 
+function applyServerInfo(info) {
+  if (info?.rtcConfig?.iceServers?.length) {
+    state.rtcConfig = info.rtcConfig;
+  }
+}
+
 // ─── WebSocket ────────────────────────────────────────────────────────────────
 function connect() {
   clearTimeout(state.reconnectTimer);
@@ -313,6 +325,7 @@ async function handleMessage(msg) {
   switch (msg.type) {
 
     case 'welcome':
+      applyServerInfo(msg.serverInfo);
       // Auto-register if name is already filled and we were sharing
       if (state.sharing && $('deviceName').value.trim()) {
         state.pendingStreamStart = true;
@@ -440,12 +453,7 @@ async function handleOffer(offer, displayId) {
 
   closePeer(displayId);
 
-  const pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  });
+  const pc = new RTCPeerConnection(state.rtcConfig);
   state.pcs.set(displayId, pc);
 
   // Add tracks

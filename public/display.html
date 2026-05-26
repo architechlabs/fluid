@@ -187,6 +187,12 @@ const state = {
   retryTimers: new Map(),
   trackTimers: new Map(),
   reconcileTimer: null,
+  rtcConfig: {
+    iceServers: [
+      { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+    ],
+    iceTransportPolicy: 'all',
+  },
 };
 
 const standby = document.getElementById('standby');
@@ -240,6 +246,12 @@ function updateStandby(info) {
   const count = getStreamingDevices().length;
   liveCount.textContent = String(count);
   standby.classList.toggle('hidden', count > 0);
+}
+
+function applyServerInfo(info) {
+  if (info?.rtcConfig?.iceServers?.length) {
+    state.rtcConfig = info.rtcConfig;
+  }
 }
 
 function tileId(deviceId) {
@@ -337,12 +349,7 @@ async function initiateRtc(deviceId) {
     }
   }
 
-  const pc = new RTCPeerConnection({
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-    ],
-  });
+  const pc = new RTCPeerConnection(state.rtcConfig);
   state.pcs.set(deviceId, pc);
   ensureTile(device);
 
@@ -441,10 +448,12 @@ function send(data) {
 async function handleMessage(msg) {
   switch (msg.type) {
     case 'welcome':
+      applyServerInfo(msg.serverInfo);
       updateStandby(msg.serverInfo);
       break;
 
     case 'display-welcome':
+      applyServerInfo(msg.serverInfo);
       state.devices = msg.devices || [];
       renderWall();
       updateStandby(msg.serverInfo);

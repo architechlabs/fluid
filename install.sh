@@ -27,6 +27,11 @@ ADMIN_PIN_FROM_ARGS="false"
 MAX_DEVICES="20"
 WITH_HTTPS="true"
 HTTPS_NAME=""
+RTC_INCLUDE_DEFAULT_STUN="true"
+RTC_TURN_URLS=""
+RTC_TURN_USERNAME=""
+RTC_TURN_CREDENTIAL=""
+RTC_ICE_TRANSPORT_POLICY="all"
 KIOSK_WIDTH=""
 KIOSK_HEIGHT=""
 WITH_NATIVE_CAST="false"
@@ -145,6 +150,16 @@ load_existing_install_config() {
     existing_value="$(read_existing_config_value PORT)"
     [[ "$existing_value" =~ ^[0-9]+$ ]] && APP_PORT="$existing_value"
   fi
+  existing_value="$(read_existing_config_value RTC_INCLUDE_DEFAULT_STUN)"
+  [[ -n "$existing_value" ]] && RTC_INCLUDE_DEFAULT_STUN="$existing_value"
+  existing_value="$(read_existing_config_value RTC_TURN_URLS)"
+  [[ -n "$existing_value" ]] && RTC_TURN_URLS="$existing_value"
+  existing_value="$(read_existing_config_value RTC_TURN_USERNAME)"
+  [[ -n "$existing_value" ]] && RTC_TURN_USERNAME="$existing_value"
+  existing_value="$(read_existing_config_value RTC_TURN_CREDENTIAL)"
+  [[ -n "$existing_value" ]] && RTC_TURN_CREDENTIAL="$existing_value"
+  existing_value="$(read_existing_config_value RTC_ICE_TRANSPORT_POLICY)"
+  [[ -n "$existing_value" ]] && RTC_ICE_TRANSPORT_POLICY="$existing_value"
 }
 
 prompt_if_needed() {
@@ -443,6 +458,13 @@ LOG_FILE=${LOG_DIR}/server.log
 FLUID_STATE_DIR=${STATE_DIR}
 CHROMIUM_BIN=${chromium_bin}
 HTTPS_REDIRECT=${WITH_HTTPS}
+# Cloudflare Tunnel exposes HTTP/WebSocket signaling, but remote WebRTC media
+# still needs ICE. Add a TURN relay here for reliable off-LAN tunnel sharing.
+RTC_INCLUDE_DEFAULT_STUN=${RTC_INCLUDE_DEFAULT_STUN}
+RTC_TURN_URLS=${RTC_TURN_URLS}
+RTC_TURN_USERNAME=${RTC_TURN_USERNAME}
+RTC_TURN_CREDENTIAL=${RTC_TURN_CREDENTIAL}
+RTC_ICE_TRANSPORT_POLICY=${RTC_ICE_TRANSPORT_POLICY}
 DISPLAY_LAYOUT_MODE=auto
 DISPLAY_LAYOUT_POLL_SECONDS=10
 DISPLAY_LAYOUT_ACTIVE_POLL_SECONDS=1

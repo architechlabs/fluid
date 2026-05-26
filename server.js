@@ -32,6 +32,9 @@ const NATIVE_CAST_MODE = String(process.env.NATIVE_CAST_MODE || 'all');
 const MIRACAST_LINK = String(process.env.MIRACAST_LINK || 'auto');
 const DISPLAY_LAYOUT_SCRIPT = path.join(__dirname, 'scripts', 'display-layout.sh');
 const DISPLAY_LAYOUT_MODES = new Set(['auto', 'browser', 'native', 'split']);
+const DEFAULT_ICE_SERVERS = [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+];
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
@@ -248,6 +251,47 @@ function getServerInfo() {
     stats,
     port:      PORT,
     publicPort: SERVER_PORT,
+    rtcConfig: getRtcConfig(),
+  };
+}
+
+function splitCsvEnv(value) {
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function getIceServers() {
+  const rawJson = process.env.RTC_ICE_SERVERS_JSON;
+  if (rawJson) {
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      logger.warn('RTC_ICE_SERVERS_JSON must be a non-empty JSON array; using fallback ICE config');
+    } catch (error) {
+      logger.warn('Invalid RTC_ICE_SERVERS_JSON:', error.message);
+    }
+  }
+
+  const servers = readBoolEnv('RTC_INCLUDE_DEFAULT_STUN', true)
+    ? [...DEFAULT_ICE_SERVERS]
+    : [];
+  const turnUrls = splitCsvEnv(process.env.RTC_TURN_URLS);
+  if (turnUrls.length > 0) {
+    const turnServer = { urls: turnUrls };
+    if (process.env.RTC_TURN_USERNAME) turnServer.username = process.env.RTC_TURN_USERNAME;
+    if (process.env.RTC_TURN_CREDENTIAL) turnServer.credential = process.env.RTC_TURN_CREDENTIAL;
+    servers.push(turnServer);
+  }
+  return servers.length > 0 ? servers : DEFAULT_ICE_SERVERS;
+}
+
+function getRtcConfig() {
+  const policy = String(process.env.RTC_ICE_TRANSPORT_POLICY || 'all').toLowerCase();
+  return {
+    iceServers: getIceServers(),
+    iceTransportPolicy: ['all', 'relay'].includes(policy) ? policy : 'all',
   };
 }
 
