@@ -85,6 +85,8 @@
     contain: layout size;
   }
   .tile video {
+    position: relative;
+    z-index: 1;
     width: 100%;
     height: 100%;
     max-width: 100%;
@@ -96,7 +98,7 @@
   .relay-frame {
     position: absolute;
     inset: 0;
-    z-index: 1;
+    z-index: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;
@@ -125,7 +127,7 @@
     text-overflow: ellipsis;
     text-shadow: 0 1px 3px #000;
     pointer-events: none;
-    z-index: 2;
+    z-index: 3;
   }
   .tile-label span {
     display: block;
@@ -306,6 +308,7 @@ function renderRelayFrame(deviceId, device, frame) {
   mergeDevice({ ...knownDevice, status: 'streaming' });
   const tile = ensureTile(knownDevice);
   tile.classList.remove('waiting');
+  tile.querySelectorAll(':scope > div:not(.tile-label)').forEach(el => el.remove());
 
   let img = tile.querySelector('.relay-frame');
   if (!img) {
@@ -315,13 +318,14 @@ function renderRelayFrame(deviceId, device, frame) {
     tile.prepend(img);
   }
   img.src = frame.dataUrl;
+  img.style.display = 'block';
   img.style.opacity = '1';
   renderTileLabel(tile, knownDevice);
 
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.set(deviceId, setTimeout(() => {
     const staleImg = document.getElementById(tileId(deviceId))?.querySelector('.relay-frame');
-    if (staleImg) staleImg.style.opacity = '0.55';
+    if (staleImg) staleImg.remove();
   }, 2500));
 
   setGrid(getStreamingDevices().length);
@@ -428,7 +432,7 @@ async function initiateRtc(deviceId) {
     label.className = 'tile-label';
     label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
 
-  tile.append(video, label);
+    tile.append(video, label);
   });
 
   pc.addEventListener('icecandidate', ev => {
@@ -541,6 +545,7 @@ async function handleMessage(msg) {
     case 'relay-ended':
       clearTimeout(state.relayTimers.get(msg.deviceId));
       state.relayTimers.delete(msg.deviceId);
+      document.getElementById(tileId(msg.deviceId))?.querySelector('.relay-frame')?.remove();
       break;
 
     case 'clear-display':
