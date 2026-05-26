@@ -40,6 +40,7 @@ check_file "systemd/fluid-native-cast.service"
 check_file "systemd/fluid-miracast.service"
 check_file "scripts/display-layout.sh"
 check_file "scripts/native-cast.sh"
+check_file "scripts/setup-cloudflare-tunnel.sh"
 
 printf "\nRuntime\n"
 if command -v node >/dev/null 2>&1; then

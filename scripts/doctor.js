@@ -120,6 +120,7 @@ for (const file of [
   'systemd/fluid-miracast.service',
   'scripts/display-layout.sh',
   'scripts/native-cast.sh',
+  'scripts/setup-cloudflare-tunnel.sh',
 ]) {
   exists(file);
 }
