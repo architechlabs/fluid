@@ -95,6 +95,9 @@
     object-fit: contain;
     background: #000;
   }
+  .tile video.video-hidden {
+    opacity: 0;
+  }
   .relay-frame {
     position: absolute;
     inset: 0;
@@ -103,6 +106,9 @@
     height: 100%;
     object-fit: contain;
     background: #000;
+  }
+  body.relay-priority .relay-frame {
+    z-index: 2;
   }
   .tile.waiting {
     display: flex;
@@ -199,6 +205,8 @@ const state = {
   retryTimers: new Map(),
   trackTimers: new Map(),
   relayTimers: new Map(),
+  videoHealthTimers: new Map(),
+  videoSampleCanvas: null,
   reconcileTimer: null,
   rtcConfig: {
     iceServers: [
@@ -214,6 +222,14 @@ const serverUrl = document.getElementById('serverUrl');
 const connDot = document.getElementById('connDot');
 const connLabel = document.getElementById('connLabel');
 const liveCount = document.getElementById('liveCount');
+
+function isPublicHostname(hostname = location.hostname) {
+  return !/^(localhost|127\.0\.0\.1|::1)$/.test(hostname)
+    && !/^(10\.|172\.(1[6-9]|2\d|3[0-1])\.|192\.168\.)/.test(hostname)
+    && !hostname.endsWith('.local');
+}
+
+document.body.classList.toggle('relay-priority', isPublicHostname());
 
 function setConnStatus(ok, label) {
   connDot.className = 'd' + (ok ? ' ok' : '');
@@ -320,6 +336,8 @@ function renderRelayFrame(deviceId, device, frame) {
   img.src = frame.dataUrl;
   img.style.display = 'block';
   img.style.opacity = '1';
+  const video = tile.querySelector('video');
+  if (video?.dataset.videoBlack === 'true') video.classList.add('video-hidden');
   renderTileLabel(tile, knownDevice);
 
   clearTimeout(state.relayTimers.get(deviceId));
@@ -364,6 +382,8 @@ function closePeer(deviceId) {
   state.trackTimers.delete(deviceId);
   clearTimeout(state.relayTimers.get(deviceId));
   state.relayTimers.delete(deviceId);
+  clearInterval(state.videoHealthTimers.get(deviceId));
+  state.videoHealthTimers.delete(deviceId);
   document.getElementById(tileId(deviceId))?.remove();
   setGrid(getStreamingDevices().length);
   updateStandby();
@@ -375,6 +395,70 @@ function resetPeer(deviceId) {
   state.pcs.delete(deviceId);
   clearTimeout(state.trackTimers.get(deviceId));
   state.trackTimers.delete(deviceId);
+  clearInterval(state.videoHealthTimers.get(deviceId));
+  state.videoHealthTimers.delete(deviceId);
+}
+
+function isMostlyBlackVideoFrame(video) {
+  if (!video.videoWidth || !video.videoHeight || video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) return false;
+
+  const canvas = state.videoSampleCanvas || (state.videoSampleCanvas = document.createElement('canvas'));
+  const width = 64;
+  const height = 36;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+
+  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+  ctx.drawImage(video, 0, 0, width, height);
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  let black = 0;
+  const total = width * height;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const luma = (pixels[i] * 0.2126) + (pixels[i + 1] * 0.7152) + (pixels[i + 2] * 0.0722);
+    if (luma <= 5) black++;
+  }
+  return black / total >= 0.992;
+}
+
+function monitorVideoHealth(deviceId, video) {
+  clearInterval(state.videoHealthTimers.get(deviceId));
+  let blackSamples = 0;
+  let goodSamples = 0;
+
+  const timer = setInterval(() => {
+    const tile = document.getElementById(tileId(deviceId));
+    if (!tile || !video.isConnected) {
+      clearInterval(timer);
+      state.videoHealthTimers.delete(deviceId);
+      return;
+    }
+
+    let isBlack = false;
+    try {
+      isBlack = isMostlyBlackVideoFrame(video);
+    } catch (error) {
+      return;
+    }
+
+    if (isBlack) {
+      blackSamples++;
+      goodSamples = 0;
+    } else {
+      goodSamples++;
+      blackSamples = 0;
+    }
+
+    if (blackSamples >= 6 && tile.querySelector('.relay-frame')) {
+      video.dataset.videoBlack = 'true';
+      video.classList.add('video-hidden');
+    }
+    if (goodSamples >= 2) {
+      video.dataset.videoBlack = 'false';
+      video.classList.remove('video-hidden');
+    }
+  }, 350);
+
+  state.videoHealthTimers.set(deviceId, timer);
 }
 
 function scheduleRetry(deviceId, delay = 1200) {
@@ -427,12 +511,14 @@ async function initiateRtc(deviceId) {
     video.muted = true;
     video.disablePictureInPicture = true;
     video.srcObject = ev.streams[0];
+    video.addEventListener('loadedmetadata', () => video.play().catch(() => {}), { once: true });
 
     const label = document.createElement('div');
     label.className = 'tile-label';
     label.innerHTML = `${escHtml(device.name)}<span>${escHtml(device.platform || 'Unknown')}</span>`;
 
     tile.append(video, label);
+    monitorVideoHealth(deviceId, video);
   });
 
   pc.addEventListener('icecandidate', ev => {
