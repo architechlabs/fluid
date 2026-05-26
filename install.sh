@@ -151,15 +151,15 @@ load_existing_install_config() {
     [[ "$existing_value" =~ ^[0-9]+$ ]] && APP_PORT="$existing_value"
   fi
   existing_value="$(read_existing_config_value RTC_INCLUDE_DEFAULT_STUN)"
-  [[ -n "$existing_value" ]] && RTC_INCLUDE_DEFAULT_STUN="$existing_value"
+  if [[ -n "$existing_value" ]]; then RTC_INCLUDE_DEFAULT_STUN="$existing_value"; fi
   existing_value="$(read_existing_config_value RTC_TURN_URLS)"
-  [[ -n "$existing_value" ]] && RTC_TURN_URLS="$existing_value"
+  if [[ -n "$existing_value" ]]; then RTC_TURN_URLS="$existing_value"; fi
   existing_value="$(read_existing_config_value RTC_TURN_USERNAME)"
-  [[ -n "$existing_value" ]] && RTC_TURN_USERNAME="$existing_value"
+  if [[ -n "$existing_value" ]]; then RTC_TURN_USERNAME="$existing_value"; fi
   existing_value="$(read_existing_config_value RTC_TURN_CREDENTIAL)"
-  [[ -n "$existing_value" ]] && RTC_TURN_CREDENTIAL="$existing_value"
+  if [[ -n "$existing_value" ]]; then RTC_TURN_CREDENTIAL="$existing_value"; fi
   existing_value="$(read_existing_config_value RTC_ICE_TRANSPORT_POLICY)"
-  [[ -n "$existing_value" ]] && RTC_ICE_TRANSPORT_POLICY="$existing_value"
+  if [[ -n "$existing_value" ]]; then RTC_ICE_TRANSPORT_POLICY="$existing_value"; fi
 }
 
 prompt_if_needed() {
