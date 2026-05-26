@@ -103,6 +103,13 @@ validate_public_url() {
   warn "DNS/Cloudflare propagation can take a little while. Check: journalctl -u cloudflared -f"
 }
 
+find_tunnel_id() {
+  local tunnel_name="$1"
+  cloudflared tunnel list 2>/dev/null | awk -v name="$tunnel_name" '
+    $1 ~ /^[0-9a-fA-F-]{36}$/ && $2 == name { print $1; exit }
+  ' || true
+}
+
 configure_token_tunnel() {
   local token="$1"
   step "Installing token-based tunnel service"
@@ -130,35 +137,17 @@ configure_named_tunnel() {
     ok "Cloudflare origin certificate already exists"
   fi
 
-  local tunnel_id credentials_src credentials_dst
-  tunnel_id="$(cloudflared tunnel list --output json 2>/dev/null | node -e '
-let data="";
-process.stdin.on("data", d => data += d);
-process.stdin.on("end", () => {
-  try {
-    const name = process.argv[1];
-    const tunnels = JSON.parse(data);
-    const found = tunnels.find(t => t.name === name && !t.deleted_at);
-    if (found) process.stdout.write(found.id);
-  } catch (_) {}
-});
-' "$tunnel_name" || true)"
+  local tunnel_id credentials_src credentials_dst create_output
+  tunnel_id="$(find_tunnel_id "$tunnel_name")"
 
   if [[ -n "$tunnel_id" ]]; then
     ok "Using existing tunnel ${tunnel_name} (${tunnel_id})"
   else
-    cloudflared tunnel create "$tunnel_name"
-    tunnel_id="$(cloudflared tunnel list --output json | node -e '
-let data="";
-process.stdin.on("data", d => data += d);
-process.stdin.on("end", () => {
-  const name = process.argv[1];
-  const tunnels = JSON.parse(data);
-  const found = tunnels.find(t => t.name === name && !t.deleted_at);
-  if (!found) process.exit(1);
-  process.stdout.write(found.id);
-});
-' "$tunnel_name")"
+    create_output="$(cloudflared tunnel create "$tunnel_name" 2>&1)"
+    printf "%s\n" "$create_output"
+    tunnel_id="$(printf "%s\n" "$create_output" | grep -Eo '[0-9a-fA-F-]{36}' | tail -n1 || true)"
+    tunnel_id="${tunnel_id:-$(find_tunnel_id "$tunnel_name")}"
+    [[ -n "$tunnel_id" ]] || die "Tunnel was created, but its id could not be detected. Run: cloudflared tunnel list"
     ok "Created tunnel ${tunnel_name} (${tunnel_id})"
   fi
 
@@ -192,7 +181,7 @@ EOF
   ok "Config written to ${CONFIG_FILE}"
 
   step "Routing DNS"
-  if cloudflared tunnel route dns "$tunnel_name" "$hostname"; then
+  if cloudflared tunnel route dns "$tunnel_id" "$hostname"; then
     ok "DNS route created for ${hostname}"
   else
     warn "DNS route command failed. If the record already exists, this may be okay."
